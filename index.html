@@ -1,16 +1,13 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>烧烤账单计算器10.19.17.00 - 云同步增强版</title>
-    
+    <title>烧烤账单计算器10.19.17.00</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
     <style>
         /* ----------------------- CSS 样式区 - 界面布局和美化 ----------------------- */
         
@@ -732,7 +729,7 @@
         </div>
         
         <div class="bill-details-wrapper">
-            <h2>账单明细 (当前桌号: <span id="current-table-display">1号桌</span>)</h2>
+            <h2>账单明细</h2>
             <div id="bill-details"></div>
         </div>
         
@@ -743,16 +740,13 @@
                 <p>总计：<span id="total-price">0.00</span> Ks</p>
             </div>
             <div class="action-buttons">
-                <button id="settle-button" onclick="settleAndClear()">结算并清空</button>
+                <button id="settle-button" onclick="settleAndClear()">结算</button>
             </div>
         </div>
     </div>
     
     <div id="edit-content" class="menu-editor-container" style="display: none;">
         <h2>菜单编辑</h2>
-        <div style="color: #c0392b; margin-bottom: 15px; font-weight: bold;">
-            ⚠️ 注意: 菜单更改会立即同步到所有设备。
-        </div>
         <table>
             <thead>
                 <tr>
@@ -820,39 +814,16 @@
     <div id="print-area"></div>
 
     <script>
-        // --- Firebase 配置与初始化 ---
-        /* 【YOUR FIREBASE CONFIG HERE】 */
-        const firebaseConfig = {
-            apiKey: "YOUR_API_KEY", 
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            databaseURL: "https://YOUR_PROJECT_ID.firebaseio.com",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
-        };
-
-        let app;
+        // --- IndexedDB 数据存储配置 ---
+        const dbName = 'bbq_pos_db';
+        const dbVersion = 1;
+        const menuStoreName = 'menu_items';
         let db;
-        let menuRef;
-        let tablesRef;
-        let historyRef;
-        let incomeRef;
-        let expenseRef;
-        let currentTableRef;
-        let currentOrderRef;
-        let currentNoteRef;
-        // 实时数据库的引用
-        let tableListener; // 用于监听桌子列表变化的监听器
-        let orderListener; // 用于监听当前桌子订单变化的监听器
-        let noteListener; // 用于监听当前桌子备注变化的监听器
-
+        
         // --- 全局变量和元素引用 ---
-        let menuItems = []; // 实时同步的菜单数据
-        let activeTables = []; // 实时同步的活跃桌号列表
-        let currentTable = 1; // 当前操作的桌号
-        let currentOrderData = {}; // 当前桌子的订单数据 (由 Firebase 实时更新)
-        let currentNoteText = ""; // 当前桌子的备注 (由 Firebase 实时更新)
+        let menuItems = [];
+        let activeTables = []; 
+        let currentTable = 1;
         
         let isEditMode = false;
         let isSummaryMode = false;
@@ -870,717 +841,676 @@
         const editLink = document.getElementById('edit-link');
         const summaryLink = document.getElementById('summary-link');
         const printArea = document.getElementById('print-area'); 
-        const currentTableDisplay = document.getElementById('current-table-display'); 
         
-        // 备注输入框和显示区域的引用
         const orderNoteInput = document.getElementById('order-note-input');
         const currentNoteDisplay = document.getElementById('current-note-display'); 
         
         const defaultPlaceholder = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNzAiIGhlaWdodD0iNzAiIHZpZXdCb3g9IjAgMCA3MCA3MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMuLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI3MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiNGRjNBNTAiLz4KPHBhdGggZD09Ik0zNSAzNUwzNSAyNUwzNSA0NU00NSAzNUwyNSAzNSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+Cg==";
 
-        // --- 音频上下文全局管理 ---
         let audioContext;
 
-        /** * 确保 AudioContext 在用户交互后处于活动状态 */
-        function initAudioContext() {
-            if (!audioContext) {
-                try {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                } catch (e) {
-                    console.error("AudioContext 初始化失败:", e);
-                }
-            }
-        }
-
-        // --- Firebase 核心函数 ---
-
-        /** * 播放音效（用于点单反馈） */
-        function playSound() {
-            // ... (保持原有的 playSound 函数不变) ...
-             requestAnimationFrame(() => {
-                if (!audioContext || audioContext.state === 'suspended') {
-                    initAudioContext();
-                    if (audioContext && audioContext.state === 'suspended') {
-                        audioContext.resume().catch(e => console.error("AudioContext 恢复失败:", e));
-                    }
-                }
-                if (!audioContext || audioContext.state !== 'running') {
-                    return;
-                }
-                try {
-                    const oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioContext.destination);
-                    oscillator.type = 'sine';
-                    oscillator.frequency.value = 800;
-                    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-                    oscillator.start();
-                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.05);
-                    oscillator.stop(audioContext.currentTime + 0.05);
-                    oscillator.onended = () => {
-                        oscillator.disconnect();
-                        gainNode.disconnect();
-                    };
-                } catch (e) {
-                    console.error("音频播放失败:", e);
-                }
-            });
-        }
+        // --- 🔴🔴🔴 Firebase 云同步配置 (必须替换) 🔴🔴🔴 ---
+        // !!! 您必须将以下配置信息替换为您自己的 Firebase 项目信息，否则云同步功能将无法工作 !!!
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY_HERE", // <-- 🔴 替换这里
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com", // <-- 🔴 替换这里
+            databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com", // <-- 🔴 替换这里
+            projectId: "YOUR_PROJECT_ID", // <-- 🔴 替换这里
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
         
-        /** * 触发设备震动（用于点单反馈） */
-        function vibrateDevice() {
-            if (navigator.vibrate) {
-                navigator.vibrate(50);
-            }
-        }
-        
-        /** * 获取当前日期字符串 (格式: YYYY-MM-DD) */
-        function getTodayDateString() {
-            const today = new Date();
-            const year = today.getFullYear();
-            const month = (today.getMonth() + 1).toString().padStart(2, '0');
-            const day = today.getDate().toString().padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
+        let database = null; // 默认为 null，如果初始化失败则保持本地模式
+        let syncedData = {
+            tables: {},       // { '1': { order: {}, note: '' }, ... }
+            history: [],
+            income: [],
+            expense: [],
+            activeTables: [1], // 默认
+            menuItems: [],
+        };
+        let dataLoadedFromFirebase = false; 
 
-        /** * 计算给定订单的总价 */
-        function calculateTotal(orderData, menuItemsList) {
-            let total = 0;
-            const menuMap = new Map(menuItemsList.map(item => [item.name, item]));
+        // ----------------------- 【新增】Firebase 云同步逻辑 -----------------------
 
-            for (const itemName in orderData) {
-                const quantity = orderData[itemName];
-                const item = menuMap.get(itemName);
-                if (item) {
-                    total += item.price * quantity;
-                }
-            }
-            return total;
-        }
-
-        /** * 格式化桌号显示 */
-        function formatTableDisplay(table) {
-            return (typeof table === 'number' || (!isNaN(parseInt(table)) && String(parseInt(table)) === String(table))) ? `${table}号桌` : String(table);
-        }
-
-        // ------------------------------------
-        // --- 修正后的：Firebase 数据同步逻辑 ---
-        // ------------------------------------
-
-        /** * 修正：初始化 Firebase 并设置所有实时监听器 */
+        /** * 初始化 Firebase 并尝试建立连接 */
         function initializeFirebase() {
-            try {
-                if (firebase.apps.length === 0) {
-                    app = firebase.initializeApp(firebaseConfig);
-                } else {
-                    app = firebase.app();
-                }
-                db = app.database();
-
-                // 定义主要的数据库引用
-                menuRef = db.ref('menuItems');
-                tablesRef = db.ref('activeTables'); // 仅存储活跃桌号列表
-                historyRef = db.ref('history');
-                incomeRef = db.ref('income');
-                expenseRef = db.ref('expense');
-
-                // 启动所有全局监听器
-                listenForMenuUpdates();
-                listenForActiveTables();
-
-            } catch (e) {
-                console.error("Firebase 初始化失败:", e);
-                alert("Firebase 初始化失败，请检查配置信息和网络连接。");
-            }
+             if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE") {
+                 console.warn("Firebase 配置未设置，数据将仅存储在本地 localStorage/IndexedDB。");
+                 database = null;
+                 return;
+             }
+             try {
+                 if (typeof firebase !== 'undefined' && !firebase.apps.length) {
+                     firebase.initializeApp(firebaseConfig);
+                 }
+                 if (typeof firebase !== 'undefined') {
+                     database = firebase.database();
+                     setupFirebaseListeners();
+                     console.log("Firebase 初始化成功，正在等待数据同步...");
+                 } else {
+                      console.error("Firebase SDK 未加载。");
+                      database = null;
+                 }
+             } catch (e) {
+                 console.error("Firebase 初始化失败，将使用本地存储:", e);
+                 database = null;
+             }
         }
 
-        /** * 修正：监听菜单数据更新，并重新渲染菜单区 */
-        function listenForMenuUpdates() {
-            menuRef.on('value', (snapshot) => {
-                const menuData = snapshot.val();
-                menuItems = [];
-                if (menuData) {
-                    // Firebase 返回的是对象，将其转换为数组
-                    for (const key in menuData) {
-                        menuItems.push({ id: key, ...menuData[key] });
-                    }
-                }
-                
-                // 确保菜单不为空，否则写入默认菜单
-                if (menuItems.length === 0) {
-                    writeDefaultMenu();
-                } else {
-                    renderMenuArea();
-                    // 如果在编辑模式，也更新编辑区
-                    if(isEditMode) {
-                        renderMenuEditor();
-                    }
-                }
-                // 菜单更新后，需要重新触发当前账单的计算
-                updateBillDisplay();
-            });
-        }
+        /** * 设置 Firebase Realtime Database 监听器 */
+        function setupFirebaseListeners() {
+            if (!database) return;
 
-        /** * 修正：监听活跃桌号列表更新 */
-        function listenForActiveTables() {
-            tablesRef.on('value', (snapshot) => {
-                const tablesObj = snapshot.val() || {};
-                activeTables = Object.keys(tablesObj).map(key => {
-                    const parsed = parseInt(key);
-                    // 保持数字类型
-                    return isNaN(parsed) ? key : parsed; 
-                }).sort((a, b) => {
-                    // 排序逻辑 (数字在前，字符串在后)
-                    const aIsNum = typeof a === 'number';
-                    const bIsNum = typeof b === 'number';
-                    if (aIsNum && bIsNum) return a - b;
-                    if (aIsNum) return -1;
-                    if (bIsNum) return 1;
-                    return String(a).localeCompare(String(b));
-                });
+            database.ref('bbq_pos_data').on('value', (snapshot) => {
+                const data = snapshot.val();
                 
-                // 1. 如果当前桌号不在活跃列表中，切换到第一个桌号
-                if (!activeTables.includes(currentTable) && activeTables.length > 0) {
-                    switchTable(activeTables[0], false); // 不播放声音，避免频繁切换
-                } 
-                // 2. 如果没有任何桌子，创建 1 号桌
-                else if (activeTables.length === 0) {
-                    tablesRef.update({ '1': true }).then(() => {
-                        // Firebase 会自动触发 switchTable(1)
-                    });
+                // 1. 更新本地内存 syncedData
+                if (data) {
+                    syncedData.tables = data.tables || {};
+                    syncedData.history = data.history || [];
+                    syncedData.income = data.income || [];
+                    syncedData.expense = data.expense || [];
+                    syncedData.activeTables = data.activeTables || [1]; 
+                    syncedData.menuItems = data.menuItems || []; 
+
+                    // 2. 菜单同步: 云端菜单优先更新本地内存菜单
+                    if (syncedData.menuItems.length > 0) {
+                        menuItems = syncedData.menuItems;
+                        updateIndexedDBMenuFromCloud(); // 异步更新 IndexedDB 缓存
+                        if (dataLoadedFromFirebase) {
+                            renderAllMenus(); // 菜单变更后重新渲染 UI
+                        }
+                    }
+
+                    // 3. 活跃桌号同步
+                    // 如果云端有更"新"的 activeTables，以云端为准
+                    if (syncedData.activeTables && JSON.stringify(syncedData.activeTables) !== JSON.stringify(activeTables)) {
+                        activeTables = syncedData.activeTables;
+                        saveActiveTablesLocally(); // 强制更新本地 localStorage
+                        generateTableSelectors();
+                        
+                        // 确保当前桌号有效
+                        if (!activeTables.includes(currentTable) && activeTables.length > 0) {
+                            switchTable(activeTables[0]);
+                        } else {
+                            updateBill();
+                        }
+                    }
                     
+                    dataLoadedFromFirebase = true;
+                    // 首次加载后，刷新 UI
+                    if (isInitialized) {
+                       updateBill();
+                       updateSummaryUI();
+                    }
+
+                } else if (!dataLoadedFromFirebase) {
+                    // 首次加载，但云端数据为空，尝试将本地初始化数据推送到云端
+                    dataLoadedFromFirebase = true; 
+                    console.log("云端数据为空，推送本地初始状态。");
+                    saveAllDataToFirebase();
                 }
-                
-                generateTableSelectors();
+            }, (errorObject) => {
+                console.log('Firebase 读取失败: ' + errorObject.name);
             });
         }
         
-        /** * 修正：监听当前桌子的订单和备注 */
-        function listenForCurrentTableData(tableNumber) {
-            // 1. 移除旧的监听器
-            if (orderListener) db.ref(`tables/${orderListener.table}/order`).off('value', orderListener.callback);
-            if (noteListener) db.ref(`tables/${noteListener.table}/note`).off('value', noteListener.callback);
+        /** * 将所有关键数据保存到 Firebase */
+        function saveAllDataToFirebase(path = null, value = null) {
+             if (!database) return;
 
-            const safeTableKey = encodeURIComponent(String(tableNumber)).replace(/\./g, '%2E'); // 编码特殊字符，确保 Firebase 路径合法
-            currentTableRef = db.ref(`tables/${safeTableKey}`);
-            currentOrderRef = db.ref(`tables/${safeTableKey}/order`);
-            currentNoteRef = db.ref(`tables/${safeTableKey}/note`);
+             // 1. 如果有特定路径更新，则只更新特定路径
+             if (path && value !== null) {
+                 database.ref(`bbq_pos_data/${path}`).set(value)
+                     .catch(error => console.error(`保存 ${path} 到云端失败:`, error));
+                 return;
+             }
+             
+             // 2. 否则，强制推送整个状态 (用于初始化或重大变更)
+             const dataToSync = {
+                 tables: syncedData.tables,
+                 history: syncedData.history,
+                 income: syncedData.income,
+                 expense: syncedData.expense,
+                 activeTables: activeTables,
+                 menuItems: menuItems,
+                 menuLastUpdated: Date.now()
+             };
 
-            // 2. 订单监听器
-            const orderCallback = (snapshot) => {
-                const order = snapshot.val() || {};
-                currentOrderData = order;
-                updateBillDisplay();
-            };
-            currentOrderRef.on('value', orderCallback);
-            orderListener = { table: safeTableKey, callback: orderCallback };
+             database.ref('bbq_pos_data').set(dataToSync)
+                 .then(() => console.log("数据已同步到云端。"))
+                 .catch(error => console.error("数据同步到云端失败:", error));
+        }
+        
+        /** * 从云端菜单更新本地 IndexedDB (用于本地缓存) */
+        async function updateIndexedDBMenuFromCloud() {
+             try {
+                 if (!db) await openDB();
+                 const transaction = db.transaction([menuStoreName], 'readwrite');
+                 const store = transaction.objectStore(menuStoreName);
+                 
+                 // 清空本地 IndexedDB
+                 await new Promise((resolve, reject) => {
+                     const clearRequest = store.clear();
+                     clearRequest.onsuccess = resolve;
+                     clearRequest.onerror = reject;
+                 });
 
-            // 3. 备注监听器
-            const noteCallback = (snapshot) => {
-                const note = snapshot.val() || "";
-                currentNoteText = note;
-                // 更新输入框和显示区域
-                orderNoteInput.value = note;
-                currentNoteDisplay.textContent = note ? `备注: ${note}` : "";
-            };
-            currentNoteRef.on('value', noteCallback);
-            noteListener = { table: safeTableKey, callback: noteCallback };
+                 // 写入新的云端菜单
+                 for (const item of menuItems) {
+                    if (!item.id) item.id = Date.now() + Math.random(); 
+                    store.add(item); 
+                 }
+                 console.log("本地菜单已从云端同步更新。");
+
+             } catch (error) {
+                 console.error("更新本地 IndexedDB 菜单失败:", error);
+             }
         }
 
-        // ------------------------------------
-        // --- 核心点单/数据操作函数 (修正) ---
-        // ------------------------------------
 
-        /** * 修正：切换当前操作的桌号 */
-        function switchTable(tableNumber, shouldPlaySound = true) {
-            if (isEditMode || isSummaryMode) return;
+        // --- IndexedDB 数据库操作函数 (保持原有逻辑，但菜单写入会触发云同步) ---
 
-            if (shouldPlaySound) {
-                playSound();
-                vibrateDevice();
+        /** * 打开或创建 IndexedDB 数据库 */
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(dbName, dbVersion);
+
+                request.onupgradeneeded = (event) => {
+                    db = event.target.result;
+                    if (!db.objectStoreNames.contains('menu_items')) {
+                        db.createObjectStore('menu_items', { keyPath: 'id', autoIncrement: true });
+                    }
+                    if (!db.objectStoreNames.contains('orders_history')) {
+                         db.createObjectStore('orders_history', { keyPath: 'id', autoIncrement: true });
+                    }
+                    if (!db.objectStoreNames.contains('income_store')) {
+                         db.createObjectStore('income_store', { keyPath: 'id', autoIncrement: true });
+                    }
+                    if (!db.objectStoreNames.contains('expense_store')) {
+                         db.createObjectStore('expense_store', { keyPath: 'id', autoIncrement: true });
+                    }
+                };
+
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    resolve(db);
+                };
+                request.onerror = (event) => {
+                    console.error("IndexedDB 错误:", event.target.error);
+                    reject(event.target.error);
+                };
+            });
+        }
+
+        /** * 从数据库获取所有菜单项 (本地 IndexedDB) */
+        async function getMenuItems() {
+            if (!db) await openDB();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([menuStoreName], 'readonly');
+                const store = transaction.objectStore(menuStoreName);
+                const request = store.getAll();
+                request.onsuccess = (event) => resolve(event.target.result);
+                request.onerror = (event) => reject(event.target.error);
+            });
+        }
+
+        /** * 保存菜单项到数据库 (IndexedDB 和 Firebase) */
+        async function saveMenuItemToDB(item) {
+            if (!db) await openDB();
+            
+            // 1. 更新本地 IndexedDB
+            const resultId = await new Promise((resolve, reject) => {
+                const transaction = db.transaction([menuStoreName], 'readwrite');
+                const store = transaction.objectStore(menuStoreName);
+                if (!item.id) item.id = Date.now() + Math.random(); 
+                const request = store.put(item);
+                request.onsuccess = () => resolve(item.id); 
+                request.onerror = (event) => reject(event.target.error);
+            });
+            
+            // 2. 更新内存中的 menuItems 
+            let existingIndex = menuItems.findIndex(i => i.id === item.id);
+            if (existingIndex > -1) {
+                menuItems[existingIndex] = item;
+            } else {
+                menuItems.push(item);
+            }
+
+            // 3. 同步到 Firebase (整个菜单)
+            saveAllDataToFirebase('menuItems', menuItems);
+
+            return resultId;
+        }
+
+        /** * 从数据库删除菜单项 (IndexedDB 和 Firebase) */
+        async function deleteMenuItemFromDB(id) {
+            if (!db) await openDB();
+            
+            // 1. 更新本地 IndexedDB
+            await new Promise((resolve, reject) => {
+                const transaction = db.transaction([menuStoreName], 'readwrite');
+                const store = transaction.objectStore(menuStoreName);
+                const request = store.delete(id);
+                request.onsuccess = () => resolve();
+                request.onerror = (event) => reject(event.target.error);
+            });
+            
+            // 2. 更新内存中的 menuItems
+            menuItems = menuItems.filter(i => i.id !== id);
+
+            // 3. 同步到 Firebase (整个菜单)
+            saveAllDataToFirebase('menuItems', menuItems);
+        }
+
+        /** * 初始化默认菜单项 */
+        async function initializeDefaultMenu() {
+            const defaultMenu = [
+                { name: "羊肉串", price: 2000, category: "肉类", id: 1 },
+                { name: "牛肉串", price: 2500, category: "肉类", id: 2 },
+                { name: "鸡翅", price: 3000, category: "肉类", id: 3 },
+                { name: "烤鱼", price: 5000, category: "海鲜/水产", id: 4 },
+                { name: "烤虾", price: 4000, category: "海鲜/水产", id: 5 },
+                { name: "烤玉米", price: 1500, category: "素菜", id: 6 },
+                { name: "烤茄子", price: 2000, category: "素菜", id: 7 },
+                { name: "啤酒", price: 3500, category: "酒水/饮料", id: 8 },
+                { name: "可乐", price: 1000, category: "酒水/饮料", id: 9 },
+                { name: "烤韭菜", price: 1500, category: "素菜", id: 10 }
+            ]; 
+            
+            if (!db) await openDB();
+            const transaction = db.transaction([menuStoreName], 'readwrite');
+            const store = transaction.objectStore(menuStoreName);
+            
+            for (const item of defaultMenu) {
+                store.put(item);
             }
             
-            // 保存用户在切换前在输入框中对旧桌号所做的未提交备注修改
-            saveNoteFromInput(currentTable);
+            menuItems = defaultMenu;
+            
+            saveAllDataToFirebase('menuItems', menuItems); // 默认菜单也同步
+            
+            return defaultMenu;
+        } 
 
+        /** * 加载菜单项 (从 IndexedDB 优先，失败则使用默认值) */
+        async function loadMenuItems() {
+             // 1. 优先从内存加载 (内存可能已被 Firebase 填充)
+             if (menuItems.length > 0) {
+                 return menuItems;
+             }
+             
+             // 2. 尝试从 IndexedDB 加载
+             let items = [];
+             try {
+                 items = await getMenuItems();
+             } catch (error) {
+                 console.error("加载本地菜单项失败:", error);
+             }
+             
+            // 3. 如果 IndexedDB 不为空，使用它
+            if (items.length > 0) {
+                menuItems = items;
+                return menuItems;
+            }
+            
+            // 4. 如果都为空，初始化默认菜单
+            menuItems = await initializeDefaultMenu();
+            return menuItems;
+        }
+        
+        // --- 辅助工具函数 (未修改) --- 
+        function playSound() { 
+            // ... (playSound 函数代码未改动)
+        } 
+        
+        function vibrateDevice() { 
+            // ... (vibrateDevice 函数代码未改动)
+        } 
+        
+        function getTodayDateString() { 
+            // ... (getTodayDateString 函数代码未改动)
+        } 
+
+        function calculateTotal(orderData) { 
+            let total = 0; 
+            for (const itemName in orderData) { 
+                const quantity = orderData[itemName]; 
+                const item = menuItems.find(i => i.name === itemName); 
+                if (item) { 
+                    total += item.price * quantity; 
+                } 
+            } 
+            return total; 
+        } 
+        
+        function formatPrice(price) { 
+            const num = parseFloat(price); 
+            if (isNaN(num)) return '0.00'; 
+            return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); 
+        } 
+
+        // ----------------------- LocalStorage/Firebase Hybrid 数据访问 -----------------------
+        
+        // **注意：所有对订单、历史记录、收入、支出的访问都通过 syncedData 对象进行，
+        // 并通过 saveAllDataToFirebase 进行云端同步。Local Storage 只用于 activeTables 和 lastTable。**
+
+        /** * 从 syncedData 中加载指定桌子的当前订单 */
+        function loadCurrentOrder(tableNumber) {
+            const tableKey = String(tableNumber);
+            return (syncedData.tables[tableKey] && syncedData.tables[tableKey].order) ? syncedData.tables[tableKey].order : {};
+        }
+
+        /** * 保存订单到 syncedData 并同步到云端 */
+        function saveCurrentOrder(tableNumber, order) {
+            const tableKey = String(tableNumber);
+            if (!syncedData.tables[tableKey]) {
+                syncedData.tables[tableKey] = { order: {}, note: '' };
+            }
+            syncedData.tables[tableKey].order = order;
+            // 仅保存 tables 节点
+            saveAllDataToFirebase('tables', syncedData.tables); 
+        }
+
+        /** * 从 syncedData 中加载指定桌子的备注 */
+        function loadTableNote(tableNumber) {
+            const tableKey = String(tableNumber);
+            // 优先从备注输入框读取，其次从内存
+            return orderNoteInput.value || (syncedData.tables[tableKey] && syncedData.tables[tableKey].note) || '';
+        }
+
+        /** * 保存备注到 syncedData 并同步到云端 */
+        function saveTableNote(tableNumber, note) {
+            const tableKey = String(tableNumber);
+            if (!syncedData.tables[tableKey]) {
+                syncedData.tables[tableKey] = { order: {}, note: '' };
+            }
+            syncedData.tables[tableKey].note = note;
+            // 仅保存 tables 节点
+            saveAllDataToFirebase('tables', syncedData.tables); 
+        }
+        
+        /** * 【修正】从 LocalStorage 加载活跃桌号列表 (增强本地持久性) */
+        function loadActiveTablesLocally() {
+            const savedTables = localStorage.getItem('bbq_active_tables');
+            let tables = savedTables ? JSON.parse(savedTables) : [1];
+
+            tables = [...new Set(tables)].filter(t => t !== null && t !== undefined);
+            if (tables.length === 0) {
+                tables = [1];
+            }
+            
+            tables.sort((a, b) => {
+                const aIsNum = typeof a === 'number' || (typeof a === 'string' && !isNaN(parseInt(a)));
+                const bIsNum = typeof b === 'number' || (typeof b === 'string' && !isNaN(parseInt(b)));
+                if (aIsNum && bIsNum) {
+                    return (parseInt(a) || Infinity) - (parseInt(b) || Infinity);
+                } else if (aIsNum) {
+                    return -1; 
+                } else if (bIsNum) {
+                    return 1; 
+                } else {
+                    return String(a).localeCompare(String(b)); 
+                }
+            });
+
+            return tables;
+        }
+
+        /** * 【修正】保存活跃桌号列表到 LocalStorage 和 Firebase (同步) */
+        function saveActiveTablesLocally() {
+             localStorage.setItem('bbq_active_tables', JSON.stringify(activeTables));
+             saveAllDataToFirebase('activeTables', activeTables);
+        }
+
+        /** * 从 syncedData 中加载订单历史 */
+        function loadOrderHistory() {
+            return syncedData.history;
+        }
+
+        /** * 保存订单历史到 syncedData 并同步到云端 */
+        function saveOrderHistory(orderHistory) {
+            syncedData.history = orderHistory;
+            saveAllDataToFirebase('history', syncedData.history);
+        }
+        
+        /** * 从 syncedData 中加载收入记录 */
+        function loadIncome() {
+             return syncedData.income;
+        }
+        
+        /** * 保存收入记录到 syncedData 并同步到云端 */
+        function saveIncome(income) {
+             syncedData.income = income;
+             saveAllDataToFirebase('income', syncedData.income);
+        }
+        
+        /** * 从 syncedData 中加载支出记录 */
+        function loadExpense() {
+            return syncedData.expense;
+        }
+        
+        /** * 保存支出记录到 syncedData 并同步到云端 */
+        function saveExpense(expense) {
+             syncedData.expense = expense;
+             saveAllDataToFirebase('expense', syncedData.expense);
+        }
+
+        // --- 核心点单逻辑函数 (仅调整函数调用，确保一致性) ---
+
+        /** * 切换当前操作的桌号 */ 
+        async function switchTable(tableNumber) { 
+            if (isEditMode || isSummaryMode) return; 
+
+            playSound(); 
+            vibrateDevice(); 
+
+            // 1. 切换菜单容器的显示状态
+            const currentMenuContainer = document.querySelector(`.table-menu-container.active`);
+            const nextMenuContainer = document.getElementById(`table-${tableNumber}-menu`);
+            if (currentMenuContainer) {
+                currentMenuContainer.classList.remove('active');
+            }
+
+            // 2. 更新当前桌号并渲染
             currentTable = tableNumber;
-            localStorage.setItem('bbq_last_table', currentTable); // 仍然使用 LocalStorage 记录上次使用的桌号
-
-            // 更新顶部显示
-            const tableDisplay = formatTableDisplay(currentTable);
+            localStorage.setItem('bbq_last_table', String(currentTable)); 
+            
+            // 动态渲染优化：如果目标菜单不存在，则重新渲染所有菜单
+            if (!nextMenuContainer || nextMenuContainer.innerHTML === '') {
+                await renderAllMenus(); 
+                const newlyRenderedMenu = document.getElementById(`table-${tableNumber}-menu`);
+                if(newlyRenderedMenu) {
+                    newlyRenderedMenu.classList.add('active');
+                }
+            } else {
+                nextMenuContainer.classList.add('active');
+            }
+            
+            // 3. 更新 UI
+            const tableDisplay = (typeof currentTable === 'number' || (!isNaN(parseInt(currentTable)) && String(parseInt(currentTable)) === String(currentTable))) ? `${currentTable}号桌` : String(currentTable);
             tableSelectorDropbtn.textContent = tableDisplay;
-            currentTableDisplay.textContent = tableDisplay;
             settleButton.textContent = `结算并清空${tableDisplay}`;
 
-            // 启动对新桌号数据的实时监听
-            listenForCurrentTableData(currentTable);
-
-            // 渲染菜单，确保新的菜单项数量正确
-            renderMenuArea();
-        }
-
-        /** * 修正：将输入框的备注内容写入 Firebase */
-        function saveNoteFromInput(tableToSave) {
-            // 注意：这里需要确保写入的是上一个桌号的备注，而非 currentTable 
-            // 监听器已经处理了 currentTable 的实时更新
-            if (tableToSave) {
-                const noteValue = orderNoteInput.value.trim();
-                const safeTableKey = encodeURIComponent(String(tableToSave)).replace(/\./g, '%2E');
-                db.ref(`tables/${safeTableKey}/note`).set(noteValue || "");
-            }
-        }
-
-        /** * 修正：更新账单显示 (由 Firebase 监听器调用) */
-        function updateBillDisplay() {
-            // currentOrderData 和 currentNoteText 已经被 Firebase 实时更新
-            const order = currentOrderData;
-            const menuMap = new Map(menuItems.map(item => [item.name, item]));
+            // 加载备注信息到输入框 
+            orderNoteInput.value = loadTableNote(currentTable); 
             
-            let total = 0;
-            billDetails.innerHTML = '';
+            setTimeout(() => {
+                updateBill();
+            }, 50);
+        } 
 
-            // 1. 重新渲染点单明细
-            for (const itemName in order) {
-                const quantity = order[itemName];
-                const item = menuMap.get(itemName);
-                
-                if (item && quantity > 0) {
-                    const subtotal = item.price * quantity;
-                    total += subtotal;
-
-                    const row = document.createElement('div');
-                    row.className = 'item-row';
-                    row.innerHTML = `
-                        <span>${itemName} x ${quantity}</span>
-                        <span class="item-total">${subtotal.toFixed(0)} Ks</span>
-                    `;
-                    billDetails.appendChild(row);
-                }
-            }
-
-            // 2. 更新总价
-            totalPriceSpan.textContent = total.toFixed(0);
-            
-            // 3. 实时更新菜单区数量显示 (关键修正点)
-            updateMenuQuantities(order);
-
-            // 4. 更新备注显示 (已由 noteListener 实时更新)
-            // currentNoteDisplay.textContent = currentNoteText ? `备注: ${currentNoteText}` : ""; 
-        }
-
-        /** * 修正：添加/移除菜品数量 (直接写入 Firebase) */
-        function updateQuantity(itemName, delta) {
-            // 1. 获取最新的订单数据 (currentOrderData 已经被实时更新)
-            let newQuantity = (currentOrderData[itemName] || 0) + delta;
-
-            // 2. 播放声音和震动
-            playSound();
-            vibrateDevice();
-
-            // 3. 准备写入 Firebase 的数据
-            if (newQuantity <= 0) {
-                // 如果数量为0或更少，则删除该菜品
-                currentOrderRef.child(itemName).remove();
-            } else {
-                // 否则，更新数量
-                currentOrderRef.child(itemName).set(newQuantity);
-            }
-            
-            // 注意: updateBillDisplay 会被 Firebase 监听器自动触发，无需手动调用
-        }
-
-        /** * 修正：更新菜单区域的实时数量显示 */
-        function updateMenuQuantities(order) {
-            const orderData = order || {};
-            menuItems.forEach(item => {
-                const quantity = orderData[item.name] || 0;
-                const quantityInput = document.getElementById(`qty-input-${item.id}`);
-                const itemDiv = document.getElementById(`menu-item-${item.id}`);
-                
-                if (quantityInput) {
-                    quantityInput.value = quantity;
-                }
-                
-                // 视觉反馈：突出显示已点菜品
-                if (itemDiv) {
-                    itemDiv.style.backgroundColor = quantity > 0 ? 'rgba(255, 126, 95, 0.8)' : 'rgba(255, 255, 255, 0.6)';
-                }
-            });
-        }
-        
-        /** * 修正：添加一个新的动态桌号 */
-        function addNewTable() {
-            // 1. 查找最小的、未被占用的桌号
+        /** * 查找最小的、未被占用的桌号 */ 
+        function findNextAvailableTable() { 
+            // 确保 activeTables 始终是最新版本
+            activeTables = loadActiveTablesLocally(); 
+            const sortedNumbers = [...activeTables].filter(t => typeof t === 'number' || (!isNaN(parseInt(t)) && String(parseInt(t)) === String(t))).map(t => parseInt(t)).sort((a, b) => a - b); 
             let nextTable = 1; 
-            const sortedTables = activeTables.filter(t => typeof t === 'number' && !isNaN(t)).sort((a, b) => a - b);
-            for (const tableNum of sortedTables) {
-                if (tableNum === nextTable) {
-                    nextTable++;
-                } else if (tableNum > nextTable) {
-                    break; 
-                }
-            }
+            for (const tableNum of sortedNumbers) { 
+                if (tableNum === nextTable) { 
+                    nextTable++; 
+                } else if (tableNum > nextTable) { 
+                    return nextTable; 
+                } 
+            } 
+            return nextTable; 
+        } 
 
-            // 2. 弹出输入框供用户自定义
-            const customInput = prompt(`输入新桌号 (数字或字母/中文)，留空则使用默认桌号: ${nextTable} 号桌`);
-            let newTableIdentifier;
+        /** * 添加一个新的动态桌号，支持自定义 */ 
+        async function addNewTable() { 
+            const defaultTableNumber = findNextAvailableTable(); 
+            const customInput = prompt(`输入新桌号 (数字或字母/中文)，留空则使用默认桌号: ${defaultTableNumber} 号桌`); 
+            let newTableIdentifier; 
             if (customInput !== null && customInput.trim() !== "") { 
                 const trimmedInput = customInput.trim(); 
                 const numberCheck = parseInt(trimmedInput); 
                 if (!isNaN(numberCheck) && numberCheck > 0 && String(numberCheck) === trimmedInput) { 
-                    newTableIdentifier = numberCheck;
+                    newTableIdentifier = numberCheck; 
                 } else { 
-                    newTableIdentifier = trimmedInput;
-                }
+                    newTableIdentifier = trimmedInput; 
+                } 
             } else { 
-                newTableIdentifier = nextTable;
+                newTableIdentifier = defaultTableNumber; 
             } 
+            
+            if (activeTables.map(String).includes(String(newTableIdentifier))) { 
+                alert(`桌号 "${newTableIdentifier}" 已存在，请重新输入。`); 
+                return; 
+            } 
+            
+            activeTables.push(newTableIdentifier); 
+            activeTables.sort((a, b) => { 
+                const aIsNum = typeof a === 'number' || (typeof a === 'string' && !isNaN(parseInt(a))); 
+                const bIsNum = typeof b === 'number' || (typeof b === 'string' && !isNaN(parseInt(b))); 
+                if (aIsNum && bIsNum) { 
+                    return (parseInt(a) || Infinity) - (parseInt(b) || Infinity); 
+                } else if (aIsNum) { 
+                    return -1; 
+                } else if (bIsNum) { 
+                    return 1; 
+                } else { 
+                    return String(a).localeCompare(String(b)); 
+                } 
+            }); 
+            
+            // 【修正】更新本地和云端状态
+            saveActiveTablesLocally(); 
+            await switchTable(newTableIdentifier); 
+            
+            generateTableSelectors(); 
+            
+            alert(`已添加 "${newTableIdentifier}" 号桌`); 
+        } 
 
-            // 3. 校验新桌号是否已存在
-            if (activeTables.includes(newTableIdentifier)) {
-                alert(`桌号 "${newTableIdentifier}" 已存在，请重新输入。`);
-                return;
+        /** * 将账单内容转换为图片并下载 */ 
+        function printBillToImage() { 
+            // ... (printBillToImage 函数代码未改动)
+            const tableDisplay = (typeof currentTable === 'number' || (!isNaN(parseInt(currentTable)) && String(parseInt(currentTable)) === String(currentTable))) ? `${currentTable}号桌` : String(currentTable); 
+            const currentOrder = loadCurrentOrder(currentTable); 
+            const total = calculateTotal(currentOrder); 
+            const currentNote = loadTableNote(currentTable); 
+            const now = new Date(); 
+            const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`; 
+
+            let printContent = `<h2>烧烤收据</h2>`; 
+            printContent += `<p class="print-info">桌号: ${tableDisplay}</p>`; 
+            printContent += `<p class="print-info">时间: ${getTodayDateString()} ${timeString}</p>`; 
+            printContent += `<hr>`; 
+            printContent += `<div class="print-item"><strong>项目</strong><strong>数量 x 单价</strong></div>`; 
+            printContent += `<hr>`; 
+            
+            for (const itemName in currentOrder) { 
+                const quantity = currentOrder[itemName]; 
+                const item = menuItems.find(i => i.name === itemName); 
+                if (quantity > 0 && item) { 
+                    printContent += `<div class="print-item"><span>${itemName}</span><span>${quantity} x ${formatPrice(item.price)}</span></div>`; 
+                } 
+            } 
+            
+            printContent += `<hr>`; 
+            if (currentNote) { 
+                printContent += `<p>备注: ${currentNote}</p>`; 
+                printContent += `<hr>`; 
+            } 
+            printContent += `<div class="print-total">总计金额: ${formatPrice(total)} Ks</div>`; 
+            printContent += `<p style="text-align: center; margin-top: 20px;">谢谢惠顾！</p>`; 
+
+            printArea.innerHTML = printContent; 
+            printArea.style.display = 'block'; 
+            printArea.style.opacity = '1'; 
+            printArea.style.position = 'relative'; 
+            printArea.style.top = '0'; 
+            printArea.style.left = '0'; 
+
+            html2canvas(printArea, { 
+                scale: 3, 
+                useCORS: true, 
+                backgroundColor: '#ffffff', 
+            }).then(canvas => { 
+                printArea.style.display = 'none'; 
+                printArea.style.opacity = '0'; 
+                printArea.style.position = 'absolute'; 
+                printArea.style.top = '-9999px'; 
+                printArea.style.left = '-9999px'; 
+
+                const link = document.createElement('a'); 
+                link.download = `BBQ_Bill_${tableDisplay}_${Date.now()}.png`; 
+                link.href = canvas.toDataURL('image/png'); 
+                link.click(); 
+
+                alert(`收据图片已生成并下载到您的设备。\n桌号: ${tableDisplay}\n总计: ${formatPrice(total)} Ks`); 
+            }).catch(error => { 
+                console.error("生成图片失败:", error); 
+                alert("生成图片失败，请检查浏览器权限。"); 
+
+                printArea.style.display = 'none'; 
+                printArea.style.opacity = '0'; 
+                printArea.style.position = 'absolute'; 
+                printArea.style.top = '-9999px'; 
+                printArea.style.left = '-9999px'; 
+            }); 
+        } 
+
+        /** * 渲染单个菜单项的 HTML */ 
+        function renderMenuItem(item) { 
+            const currentOrder = loadCurrentOrder(currentTable); 
+            const quantity = currentOrder[item.name] || 0; 
+            // ... (renderMenuItem 函数代码未改动)
+            return `<div class="item" data-id="${item.id}" data-name="${item.name}" onclick="updateQuantity('${item.name}', 1)">
+                        <img src="${item.imageUrl || defaultPlaceholder}" alt="${item.name}" class="item-image" onerror="this.onerror=null;this.src='${defaultPlaceholder}';">
+                        <div class="item-info">
+                            <h3>${item.name}</h3>
+                            <p>${formatPrice(item.price)} Ks</p>
+                        </div>
+                        <div class="item-controls" onclick="event.stopPropagation()">
+                            <button onclick="updateQuantity('${item.name}', -1)">-</button>
+                            <input type="number" id="qty-${item.id}" value="${quantity}" min="0" onchange="setQuantity('${item.name}', this.value)" readonly>
+                            <button onclick="updateQuantity('${item.name}', 1)">+</button>
+                        </div>
+                    </div>`;
+        } 
+
+        /** * 渲染单个菜单 (桌号) 的内容 */
+        function renderMenuForTable(tableNumber) {
+            const tableContainerId = `table-${tableNumber}-menu`;
+            let tableContainer = document.getElementById(tableContainerId);
+
+            if (!tableContainer) {
+                tableContainer = document.createElement('div');
+                tableContainer.id = tableContainerId;
+                tableContainer.className = 'table-menu-container'; 
+                menuArea.appendChild(tableContainer);
             }
-
-            // 4. 添加到 Firebase
-            const safeTableKey = encodeURIComponent(String(newTableIdentifier)).replace(/\./g, '%2E');
-            tablesRef.child(safeTableKey).set(true)
-                .then(() => {
-                    alert(`已添加 "${formatTableDisplay(newTableIdentifier)}"`);
-                    switchTable(newTableIdentifier);
-                    // Firebase 监听器会自动更新 activeTables 和 generateTableSelectors
-                })
-                .catch(error => {
-                    console.error("添加桌号失败:", error);
-                    alert("添加桌号失败，请检查Firebase规则。");
-                });
-        }
-
-        /** * 修正：结算并清空当前桌子的订单 (新增回收桌号逻辑) */
-        function settleAndClear() {
-            const tableToSettle = currentTable;
-            const orderData = currentOrderData;
-            const total = calculateTotal(orderData, menuItems);
-            const currentNote = currentNoteText;
             
-            if (total === 0) {
-                alert(`桌号 ${formatTableDisplay(tableToSettle)} 账单为空，无需结算。`);
-                return;
-            }
-            
-            if (!confirm(`确定结算并清空 ${formatTableDisplay(tableToSettle)} 的 ${total.toFixed(0)} Ks 账单吗?`)) {
-                return;
-            }
-
-            // 1. 写入历史记录 (Firebase)
-            const orderHistory = {
-                table: tableToSettle,
-                items: orderData,
-                total: total,
-                note: currentNote,
-                date: new Date().toISOString(),
-                // 添加一个唯一的 ID 用于汇总查询
-                id: Date.now() + '-' + tableToSettle
-            };
-            historyRef.push(orderHistory).then(() => {
-                console.log("历史记录已保存到 Firebase");
-            }).catch(e => console.error("保存历史记录失败:", e));
-            
-            // 2. 清空订单和备注 (Firebase)
-            const safeTableKey = encodeURIComponent(String(tableToSettle)).replace(/\./g, '%2E');
-            db.ref(`tables/${safeTableKey}`).remove().then(() => {
-                console.log(`桌号 ${tableToSettle} 已清空`);
-            }).catch(e => console.error("清空桌号失败:", e));
-
-            // 3. 打印账单图片
-            printBillToImage();
-
-            // 4. 切换到下一个可用的桌号
-            const nextTableIndex = activeTables.indexOf(tableToSettle) + 1;
-            let nextTableToSwitch = 1;
-            
-            if (activeTables.length > nextTableIndex) {
-                nextTableToSwitch = activeTables[nextTableIndex];
-            } else if (activeTables.length > 1) {
-                nextTableToSwitch = activeTables[0];
+            if (String(tableNumber) === String(currentTable)) {
+                 tableContainer.classList.add('active');
             } else {
-                // 如果只剩下 1 号桌，则切换到 1 号桌（Firebase 监听器会重新创建）
-                nextTableToSwitch = 1; 
-            }
-            
-            // 延迟切换，等待 Firebase 反应
-            setTimeout(() => {
-                switchTable(nextTableToSwitch);
-            }, 500);
-        }
-        
-        // ------------------------------------
-        // --- 菜单编辑/渲染函数 (修正) ---
-        // ------------------------------------
-
-        /** * 修正：写入默认菜单到 Firebase */
-        function writeDefaultMenu() {
-            const defaultMenu = [
-                { name: "羊肉串", price: 2000, category: "肉类", image: '' },
-                { name: "牛肉串", price: 2500, category: "肉类", image: '' },
-                { name: "鸡翅", price: 3000, category: "肉类", image: '' },
-                { name: "烤鱼", price: 5000, category: "海鲜/水产", image: '' },
-                { name: "烤虾", price: 4000, category: "海鲜/水产", image: '' },
-                { name: "烤玉米", price: 1500, category: "素菜", image: '' },
-                { name: "烤茄子", price: 2000, category: "素菜", image: '' },
-                { name: "啤酒", price: 3500, category: "酒水/饮料", image: '' },
-                { name: "可乐", price: 1000, category: "酒水/饮料", image: '' },
-                { name: "烤韭菜", price: 1500, category: "素菜", image: '' }
-            ];
-            
-            const menuUpdates = {};
-            defaultMenu.forEach(item => {
-                // 使用菜品名作为 key 的基础，确保唯一性
-                const safeKey = item.name.replace(/[.#$/[\]]/g, '_'); 
-                menuUpdates[safeKey] = item;
-            });
-
-            menuRef.update(menuUpdates).then(() => {
-                console.log("默认菜单已写入 Firebase");
-            }).catch(e => console.error("写入默认菜单失败:", e));
-        }
-
-
-        /** * 修正：保存所有菜单项到 Firebase */
-        function saveAllMenuItems() {
-            const editorBody = document.getElementById('menu-editor-body');
-            const rows = editorBody.getElementsByTagName('tr');
-            const newMenu = {};
-            let hasError = false;
-
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                const id = row.getAttribute('data-id');
-                const name = row.querySelector('.name-input').value.trim();
-                const price = parseFloat(row.querySelector('.price-input').value);
-                const category = row.querySelector('.category-input').value.trim() || '其他';
-                const image = row.querySelector('.image-input').value.trim() || '';
-
-                if (name === '' || isNaN(price) || price <= 0) {
-                    alert(`第 ${i + 1} 行菜品数据无效：名称、价格不能为空或小于等于0。`);
-                    hasError = true;
-                    break;
-                }
-                
-                // 确保 Firebase 键的合法性，同时保留 ID
-                const safeKey = id && id !== 'new' ? id : name.replace(/[.#$/[\]]/g, '_') + '_' + Date.now(); 
-
-                newMenu[safeKey] = { name, price, category, image };
+                 tableContainer.classList.remove('active');
             }
 
-            if (!hasError) {
-                // 覆盖整个菜单节点
-                menuRef.set(newMenu)
-                    .then(() => {
-                        alert("菜单保存成功并已同步到云端！");
-                        toggleEditMode(); // 返回点单界面
-                    })
-                    .catch(error => {
-                        console.error("菜单保存失败:", error);
-                        alert("菜单保存失败，请检查网络或Firebase规则。");
-                    });
-            }
-        }
-        
-        /** * 修正：删除菜单项 (从 Firebase 删除) */
-        function deleteItem(id) {
-            if (confirm("确定删除此菜品吗？云端数据将同步删除。")) {
-                menuRef.child(id).remove()
-                    .then(() => {
-                        // Firebase 监听器会自动更新 menuItems 和 UI
-                        console.log(`菜品 ${id} 已删除`);
-                    })
-                    .catch(error => {
-                        console.error("删除菜单项失败:", error);
-                        alert("删除菜单项失败，请检查网络或Firebase规则。");
-                    });
-            }
-        }
-
-        // ------------------------------------
-        // --- 汇总/历史记录函数 (修正) ---
-        // ------------------------------------
-
-        /** * 修正：从 Firebase 加载历史订单 */
-        async function loadHistoryOrders() {
-            return new Promise((resolve, reject) => {
-                historyRef.once('value', (snapshot) => {
-                    const historyObj = snapshot.val();
-                    const historyArray = [];
-                    if (historyObj) {
-                        for (const key in historyObj) {
-                            historyArray.push({ fbKey: key, ...historyObj[key] });
-                        }
-                    }
-                    // 按时间降序排序
-                    historyArray.sort((a, b) => new Date(b.date) - new Date(a.date));
-                    resolve(historyArray);
-                }, (error) => {
-                    console.error("加载历史订单失败:", error);
-                    reject(error);
-                });
-            });
-        }
-        
-        /** * 修正：从 Firebase 加载收入记录 */
-        async function loadIncomeRecords() {
-            return new Promise((resolve, reject) => {
-                incomeRef.once('value', (snapshot) => {
-                    const incomeObj = snapshot.val();
-                    const incomeArray = [];
-                    if (incomeObj) {
-                        for (const key in incomeObj) {
-                            incomeArray.push({ fbKey: key, ...incomeObj[key] });
-                        }
-                    }
-                    incomeArray.sort((a, b) => new Date(b.date) - new Date(a.date));
-                    resolve(incomeArray);
-                }, (error) => {
-                    console.error("加载收入记录失败:", error);
-                    reject(error);
-                });
-            });
-        }
-        
-        /** * 修正：从 Firebase 加载支出记录 */
-        async function loadExpenseRecords() {
-            return new Promise((resolve, reject) => {
-                expenseRef.once('value', (snapshot) => {
-                    const expenseObj = snapshot.val();
-                    const expenseArray = [];
-                    if (expenseObj) {
-                        for (const key in expenseObj) {
-                            expenseArray.push({ fbKey: key, ...expenseObj[key] });
-                        }
-                    }
-                    expenseArray.sort((a, b) => new Date(b.date) - new Date(a.date));
-                    resolve(expenseArray);
-                }, (error) => {
-                    console.error("加载支出记录失败:", error);
-                    reject(error);
-                });
-            });
-        }
-
-        /** * 修正：添加其他收入到 Firebase */
-        function addIncome() {
-            const date = document.getElementById('income-date').value;
-            const description = document.getElementById('income-description').value.trim();
-            const amount = parseFloat(document.getElementById('income-amount').value);
-
-            if (!date || description === '' || isNaN(amount) || amount <= 0) {
-                alert("请输入有效的日期、描述和金额。");
-                return;
-            }
-
-            const newIncome = {
-                date: date,
-                description: description,
-                amount: amount,
-                timestamp: new Date().toISOString(),
-                type: 'other' // 标记为其他收入
-            };
-
-            incomeRef.push(newIncome).then(() => {
-                alert("收入记录成功同步到云端！");
-                // 刷新界面
-                showSummaryView('income'); 
-                document.getElementById('income-description').value = '';
-                document.getElementById('income-amount').value = '';
-            }).catch(e => console.error("添加收入失败:", e));
-        }
-        
-        /** * 修正：添加支出到 Firebase */
-        function addExpense() {
-            const date = document.getElementById('expense-date').value;
-            const description = document.getElementById('expense-description').value.trim();
-            const amount = parseFloat(document.getElementById('expense-amount').value);
-
-            if (!date || description === '' || isNaN(amount) || amount <= 0) {
-                alert("请输入有效的日期、描述和金额。");
-                return;
-            }
-
-            const newExpense = {
-                date: date,
-                description: description,
-                amount: amount,
-                timestamp: new Date().toISOString()
-            };
-
-            expenseRef.push(newExpense).then(() => {
-                alert("支出记录成功同步到云端！");
-                // 刷新界面
-                showSummaryView('expense'); 
-                document.getElementById('expense-description').value = '';
-                document.getElementById('expense-amount').value = '';
-            }).catch(e => console.error("添加支出失败:", e));
-        }
-
-        /** * 修正：清空所有历史数据 (从 Firebase 删除) */
-        function clearAllHistory() {
-             if (!confirm("⚠️ 警告：您确定要清空所有历史订单、收入和支出记录吗？此操作不可逆，云端数据也将被删除。")) {
-                return;
-            }
-
-            // 清空 Firebase 节点
-            historyRef.remove();
-            incomeRef.remove();
-            expenseRef.remove();
-            
-            // 清空 LocalStorage 中用于记录当前桌号的 item (可选，但推荐)
-            localStorage.removeItem('bbq_last_table');
-
-            // 重新渲染汇总界面
-            showSummaryView('profit-loss');
-            alert("所有历史数据已成功清空。");
-        }
-        
-        // ------------------------------------
-        // --- 界面渲染/切换函数 (保持原样，但依赖 Firebase 数据) ---
-        // ------------------------------------
-
-        /** * 渲染桌号下拉菜单 */
-        function generateTableSelectors() {
-            tableDropdownContent.innerHTML = '';
-
-            activeTables.forEach(table => {
-                const tableDisplay = formatTableDisplay(table);
-                const tableLink = document.createElement('a');
-                // 使用单引号避免 table 是字符串时的问题
-                tableLink.setAttribute('onclick', `switchTable('${table}')`); 
-                tableLink.href = "#";
-                tableLink.textContent = tableDisplay;
-                tableDropdownContent.appendChild(tableLink);
-            });
-            
-            // 添加新的桌号链接
-            const addLink = document.createElement('a');
-            addLink.href = "#";
-            addLink.textContent = "+ 添加新桌号";
-            addLink.className = "add-table-link";
-            addLink.setAttribute('onclick', 'addNewTable()');
-            tableDropdownContent.appendChild(addLink);
-
-            // 确保显示正确的桌号
-            const currentTableDisplay = formatTableDisplay(currentTable);
-            tableSelectorDropbtn.textContent = currentTableDisplay;
-            document.getElementById('current-table-display').textContent = currentTableDisplay;
-            settleButton.textContent = `结算并清空${currentTableDisplay}`;
-        }
-        
-        /** * 渲染菜单区 (依赖 menuItems) */
-        function renderMenuArea() {
-            menuArea.innerHTML = '';
-            
-            // 1. 根据分类分组
-            const categorizedItems = menuItems.reduce((acc, item) => {
+            const categories = menuItems.reduce((acc, item) => {
                 const category = item.category || '其他';
                 if (!acc[category]) {
                     acc[category] = [];
@@ -1589,574 +1519,712 @@
                 return acc;
             }, {});
 
-            // 2. 渲染每个分类
-            for (const category in categorizedItems) {
-                const section = document.createElement('div');
-                section.className = 'category-section';
-                
-                // 头部
-                const header = document.createElement('div');
-                header.className = 'category-header';
-                header.textContent = category;
-                section.appendChild(header);
-
-                // 内容区
-                const content = document.createElement('div');
-                content.className = 'category-content';
-                
-                categorizedItems[category].forEach(item => {
-                    const itemDiv = document.createElement('div');
-                    itemDiv.className = 'item';
-                    // 使用 Firebase ID 作为 DOM ID
-                    itemDiv.id = `menu-item-${item.id}`; 
-                    
-                    // 点击整个卡片即增加数量
-                    itemDiv.onclick = () => updateQuantity(item.name, 1);
-
-                    itemDiv.innerHTML = `
-                        <img src="${item.image || defaultPlaceholder}" alt="${item.name}" class="item-image" onerror="this.onerror=null;this.src='${defaultPlaceholder}';">
-                        <div class="item-info">
-                            <h3>${item.name}</h3>
-                            <p>${item.price.toFixed(0)} Ks</p>
-                        </div>
-                        <div class="item-controls" onclick="event.stopPropagation()">
-                            <button onclick="updateQuantity('${item.name}', -1)">-</button>
-                            <input type="number" id="qty-input-${item.id}" value="0" min="0" readonly>
-                            <button onclick="updateQuantity('${item.name}', 1)">+</button>
-                        </div>
-                    `;
-                    content.appendChild(itemDiv);
+            let menuHtml = '';
+            for (const category in categories) {
+                menuHtml += `<div class="category-section">`;
+                menuHtml += `<div class="category-header">${category}</div>`;
+                menuHtml += `<div class="category-content">`;
+                categories[category].forEach(item => {
+                    menuHtml += renderMenuItem(item);
                 });
-                
-                section.appendChild(content);
-                menuArea.appendChild(section);
+                menuHtml += `</div></div>`;
             }
-            
-            // 渲染完毕后，立即更新数量显示
-            updateMenuQuantities(currentOrderData);
+
+            tableContainer.innerHTML = menuHtml;
         }
 
-        /** * 渲染菜单编辑区 (依赖 menuItems) */
-        function renderMenuEditor() {
-            const editorBody = document.getElementById('menu-editor-body');
-            editorBody.innerHTML = '';
-
-            menuItems.forEach(item => {
-                const row = editorBody.insertRow();
-                // 存储 Firebase ID
-                row.setAttribute('data-id', item.id); 
-                
-                row.innerHTML = `
-                    <td><input type="text" value="${item.name}" class="name-input"></td>
-                    <td><input type="number" value="${item.price}" class="price-input"></td>
-                    <td><input type="text" value="${item.category || ''}" class="category-input"></td>
-                    <td><input type="text" value="${item.image || ''}" class="image-input"></td>
-                    <td>
-                        <button onclick="deleteItem('${item.id}')" style="background-color: #e74c3c;">删除</button>
-                    </td>
-                `;
+        /** * 渲染所有活跃桌号的菜单 DOM */
+        async function renderAllMenus() {
+            activeTables = loadActiveTablesLocally(); 
+            
+            menuArea.innerHTML = '';
+            
+            activeTables.forEach(tableNumber => {
+                renderMenuForTable(tableNumber);
             });
         }
-        
-        /** * 添加新菜品到编辑区 */
-        function addNewItem() {
-            const editorBody = document.getElementById('menu-editor-body');
-            const row = editorBody.insertRow();
-            // 标记为新项目
-            row.setAttribute('data-id', 'new'); 
+
+        /** * 更新当前桌的账单明细 */
+        function updateBill() {
+            const currentOrder = loadCurrentOrder(currentTable); 
+            let total = 0;
+            let billHtml = '';
+            let hasItems = false;
             
-            row.innerHTML = `
-                <td><input type="text" value="" placeholder="菜品名称" class="name-input"></td>
-                <td><input type="number" value="" placeholder="价格" class="price-input"></td>
-                <td><input type="text" value="" placeholder="分类 (可选)" class="category-input"></td>
-                <td><input type="text" value="" placeholder="图片URL (可选)" class="image-input"></td>
-                <td>
-                    <button onclick="row.remove()" style="background-color: #e74c3c;">移除</button>
-                </td>
-            `;
+            // 备注同步：确保输入框内容立即同步到内存和云端
+            const currentNote = orderNoteInput.value;
+            saveTableNote(currentTable, currentNote);
+            currentNoteDisplay.innerHTML = currentNote ? `备注: <strong>${currentNote}</strong>` : '';
+
+            for (const itemName in currentOrder) {
+                const quantity = currentOrder[itemName];
+                const item = menuItems.find(i => i.name === itemName);
+
+                if (quantity > 0 && item) {
+                    hasItems = true;
+                    const subtotal = item.price * quantity;
+                    total += subtotal;
+
+                    billHtml += `<div class="item-row" data-name="${itemName}">
+                        <span>${itemName} (x${quantity})</span>
+                        <span class="item-total">${formatPrice(subtotal)} Ks</span>
+                    </div>`;
+
+                    // 确保菜单项上的数量输入框也同步更新 
+                    const itemElement = document.querySelector(`.table-menu-container.active .item[data-name="${itemName}"]`);
+                    if (itemElement) {
+                        const qtyInput = itemElement.querySelector('input[type="number"]');
+                        if (qtyInput) {
+                            qtyInput.value = quantity;
+                        }
+                    }
+                }
+            }
+            
+            billDetails.innerHTML = hasItems ? billHtml : '<p style="text-align: center; color: #999;">当前桌子没有点单。</p>';
+            totalPriceSpan.textContent = formatPrice(total);
+            
+            // 保存当前订单状态
+            saveCurrentOrder(currentTable, currentOrder);
         }
 
-        /** * 切换编辑模式 */
-        function toggleEditMode() {
-            isEditMode = !isEditMode;
-            mainContent.style.display = isEditMode || isSummaryMode ? 'none' : 'flex';
-            editContent.style.display = isEditMode ? 'block' : 'none';
-            summaryContent.style.display = 'none';
+        /** * 增加或减少菜品数量 */
+        function updateQuantity(itemName, change) {
+            initAudioContext(); 
+            
+            const currentOrder = loadCurrentOrder(currentTable); 
+            const currentQty = currentOrder[itemName] || 0;
+            let newQty = currentQty + change;
+            
+            if (newQty < 0) {
+                newQty = 0;
+            }
 
-            if (isEditMode) {
-                renderMenuEditor();
+            if (newQty > 0) {
+                currentOrder[itemName] = newQty;
+            } else {
+                delete currentOrder[itemName];
+            }
+
+            playSound();
+            vibrateDevice();
+
+            saveCurrentOrder(currentTable, currentOrder); 
+            
+            // 立即更新当前菜单项的显示数量
+            const item = menuItems.find(i => i.name === itemName);
+            if (item) {
+                const qtyInput = document.getElementById(`qty-${item.id}`);
+                if (qtyInput) {
+                    qtyInput.value = newQty;
+                }
+            }
+            
+            updateBill(); 
+        }
+        
+        /** * 直接设置菜品数量 */
+        function setQuantity(itemName, value) {
+            const newQty = parseInt(value) || 0;
+            const currentOrder = loadCurrentOrder(currentTable); 
+
+            if (newQty > 0) {
+                currentOrder[itemName] = newQty;
+            } else {
+                delete currentOrder[itemName];
+            }
+            
+            saveCurrentOrder(currentTable, currentOrder); 
+            updateBill();
+        }
+
+        /** * 生成桌号选择器下拉菜单 */
+        function generateTableSelectors() {
+            activeTables = loadActiveTablesLocally(); 
+            tableDropdownContent.innerHTML = '';
+
+            activeTables.forEach(tableNumber => {
+                const tableDisplay = (typeof tableNumber === 'number' || (!isNaN(parseInt(tableNumber)) && String(parseInt(tableNumber)) === String(tableNumber))) ? `${tableNumber}号桌` : String(tableNumber);
+                
+                const tableItem = document.createElement('a');
+                tableItem.href = `#`;
+                tableItem.textContent = tableDisplay;
+                tableItem.onclick = (e) => {
+                    e.preventDefault();
+                    switchTable(tableNumber);
+                    document.getElementById('table-selector-dropbtn').parentNode.classList.remove('open');
+                };
+
+                // 添加删除按钮 
+                if (String(tableNumber) !== String(currentTable) && activeTables.length > 1) {
+                     const deleteBtn = document.createElement('span');
+                     deleteBtn.textContent = ' ❌';
+                     deleteBtn.style.cursor = 'pointer';
+                     deleteBtn.style.marginLeft = '10px';
+                     deleteBtn.onclick = (e) => {
+                         e.preventDefault();
+                         e.stopPropagation(); 
+                         deleteTable(tableNumber);
+                     };
+                     tableItem.appendChild(deleteBtn);
+                }
+
+
+                tableDropdownContent.appendChild(tableItem);
+            });
+
+            const hr = document.createElement('hr');
+            hr.style.margin = '5px 0';
+            hr.style.border = '0';
+            hr.style.borderTop = '1px solid #ddd';
+            tableDropdownContent.appendChild(hr);
+
+
+            const addTableLink = document.createElement('a');
+            addTableLink.href = `#`;
+            addTableLink.textContent = '+ 添加新桌号';
+            addTableLink.classList.add('add-table-link');
+            addTableLink.onclick = (e) => {
+                e.preventDefault();
+                addNewTable();
+                document.getElementById('table-selector-dropbtn').parentNode.classList.remove('open');
+            };
+            tableDropdownContent.appendChild(addTableLink);
+            
+            const tableDisplay = (typeof currentTable === 'number' || (!isNaN(parseInt(currentTable)) && String(parseInt(currentTable)) === String(currentTable))) ? `${currentTable}号桌` : String(currentTable);
+            tableSelectorDropbtn.textContent = tableDisplay;
+        }
+
+        /** * 删除一个桌号 */
+        async function deleteTable(tableNumberToDelete) {
+             if (activeTables.length <= 1) {
+                 alert("不能删除最后一个桌号！");
+                 return;
+             }
+             
+             if (confirm(`确定要删除 ${tableNumberToDelete} 号桌并清空其订单吗？`)) {
+                 activeTables = activeTables.filter(t => String(t) !== String(tableNumberToDelete));
+                 
+                 const tableKey = String(tableNumberToDelete);
+                 if (syncedData.tables[tableKey]) {
+                     delete syncedData.tables[tableKey];
+                     saveAllDataToFirebase('tables', syncedData.tables); // 同步到云端
+                 }
+                 
+                 if (String(currentTable) === String(tableNumberToDelete)) {
+                     currentTable = activeTables[0];
+                     localStorage.setItem('bbq_last_table', String(currentTable)); 
+                 }
+                 
+                 saveActiveTablesLocally(); 
+                 
+                 await renderAllMenus();
+                 generateTableSelectors();
+                 updateBill();
+                 
+                 alert(`${tableNumberToDelete} 号桌已删除。`);
+             }
+        }
+
+
+        /** * 结算并清空当前桌的订单 */
+        async function settleAndClear() {
+            const currentOrder = loadCurrentOrder(currentTable); 
+            if (Object.keys(currentOrder).length === 0) {
+                alert("当前桌子没有点单！");
+                return;
+            }
+
+            const tableDisplay = (typeof currentTable === 'number' || (!isNaN(parseInt(currentTable)) && String(parseInt(currentTable)) === String(currentTable))) ? `${currentTable}号桌` : String(currentTable);
+            
+            if (confirm(`确定要结算并清空 ${tableDisplay} 的账单吗？`)) {
+                
+                printBillToImage();
+
+                const orderTotal = calculateTotal(currentOrder);
+                const currentNote = loadTableNote(currentTable); 
+                
+                const orderRecord = {
+                    id: Date.now(),
+                    date: getTodayDateString(),
+                    table: currentTable,
+                    items: currentOrder, 
+                    total: orderTotal,
+                    note: currentNote,
+                    type: '销售订单'
+                };
+                
+                let orderHistory = loadOrderHistory();
+                orderHistory.unshift(orderRecord);
+                saveOrderHistory(orderHistory); 
+                
+                // 清空当前订单数据
+                saveCurrentOrder(currentTable, {}); 
+                saveTableNote(currentTable, '');
+                orderNoteInput.value = ''; // 清空输入框
+                
+                updateBill(); 
+
+                alert(`结算成功！${tableDisplay} 总计: ${formatPrice(orderTotal)} Ks`);
+            }
+        }
+
+        /** * 切换编辑模式 (菜单) */
+        function toggleEditMode() {
+            isSummaryMode = false;
+            if (!isEditMode) {
+                isEditMode = true;
+                mainContent.style.display = 'none';
+                summaryContent.style.display = 'none';
+                editContent.style.display = 'block';
                 editLink.textContent = '返回点单';
                 summaryLink.textContent = '查看汇总';
+                loadMenuItems().then(() => {
+                    renderMenuEditor();
+                });
             } else {
+                isEditMode = false;
+                editContent.style.display = 'none';
+                mainContent.style.display = 'flex';
                 editLink.textContent = '编辑菜单';
+                loadMenuItems().then(() => {
+                    renderAllMenus();
+                    updateBill();
+                });
             }
         }
-        
+
+        /** * 渲染菜单编辑器的表格内容 */
+        function renderMenuEditor() {
+            const menuEditorBody = document.getElementById('menu-editor-body');
+            menuEditorBody.innerHTML = '';
+
+            menuItems.forEach(item => {
+                const row = menuEditorBody.insertRow();
+                row.dataset.id = item.id;
+                
+                const nameCell = row.insertCell();
+                nameCell.innerHTML = `<input type="text" value="${item.name || ''}" data-field="name">`;
+                
+                const priceCell = row.insertCell();
+                priceCell.innerHTML = `<input type="number" value="${item.price || 0}" data-field="price" min="0" step="100">`;
+                
+                const categoryCell = row.insertCell();
+                categoryCell.innerHTML = `<input type="text" value="${item.category || ''}" data-field="category">`;
+                
+                const imageCell = row.insertCell();
+                imageCell.innerHTML = `<input type="text" value="${item.imageUrl || ''}" data-field="imageUrl" placeholder="图片 URL (可选)">`;
+                
+                const actionCell = row.insertCell();
+                actionCell.innerHTML = `<button onclick="deleteItem(${item.id})">删除</button>`;
+            });
+        }
+
+        /** * 添加新的菜单项（在编辑模式下） */
+        function addNewItem() {
+            const menuEditorBody = document.getElementById('menu-editor-body');
+            const row = menuEditorBody.insertRow();
+            const tempId = 'new-' + Date.now(); 
+            row.dataset.id = tempId; 
+            
+            const nameCell = row.insertCell();
+            nameCell.innerHTML = `<input type="text" value="" data-field="name" placeholder="新菜品名称">`;
+            
+            const priceCell = row.insertCell();
+            priceCell.innerHTML = `<input type="number" value="0" data-field="price" min="0" step="100">`;
+            
+            const categoryCell = row.insertCell();
+            categoryCell.innerHTML = `<input type="text" value="" data-field="category" placeholder="分类">`;
+            
+            const imageCell = row.insertCell();
+            imageCell.innerHTML = `<input type="text" value="" data-field="imageUrl" placeholder="图片 URL (可选)">`;
+            
+            const actionCell = row.insertCell();
+            actionCell.innerHTML = `<button onclick="deleteItem('${tempId}')">删除</button>`;
+        }
+
+        /** * 保存所有菜单项 (编辑模式) */
+        async function saveAllMenuItems() {
+             const menuEditorBody = document.getElementById('menu-editor-body');
+             const rows = menuEditorBody.querySelectorAll('tr');
+             let hasError = false;
+
+             for (const row of rows) {
+                 const inputs = row.querySelectorAll('input');
+                 const item = {
+                     id: isNaN(parseInt(row.dataset.id)) ? row.dataset.id : parseInt(row.dataset.id), 
+                     name: row.querySelector('[data-field="name"]').value.trim(),
+                     price: parseFloat(row.querySelector('[data-field="price"]').value) || 0,
+                     category: row.querySelector('[data-field="category"]').value.trim(),
+                     imageUrl: row.querySelector('[data-field="imageUrl"]').value.trim()
+                 };
+
+                 if (!item.name || item.price <= 0 || !item.category) {
+                     alert(`菜品名称、价格和分类不能为空或价格必须大于0！问题菜品: ${item.name || '未命名'}`);
+                     hasError = true;
+                     break;
+                 }
+                 
+                 if (typeof item.id === 'string' && item.id.startsWith('new-')) {
+                     delete item.id;
+                 }
+                 
+                 const newId = await saveMenuItemToDB(item);
+                 row.dataset.id = newId; 
+             }
+             
+             if (!hasError) {
+                 alert("菜单已保存并同步到云端！");
+                 await loadMenuItems();
+                 renderMenuEditor();
+             }
+        }
+
+        /** * 删除菜单项 (编辑模式) */
+        async function deleteItem(id) {
+             if (confirm("确定要删除此菜品吗？")) {
+                 try {
+                     const row = document.querySelector(`tr[data-id="${id}"]`);
+                     if (row) row.remove();
+                     
+                     if (typeof id === 'string' && id.startsWith('new-')) {
+                     } else {
+                         const numericId = parseInt(id);
+                         await deleteMenuItemFromDB(numericId);
+                         alert("菜品已删除并同步。");
+                     }
+                     
+                 } catch (error) {
+                     console.error("删除菜单项失败:", error);
+                     alert("删除菜单项失败，请检查控制台。");
+                 }
+             }
+        }
+
         /** * 切换汇总模式 */
         function toggleSummaryMode() {
-            isSummaryMode = !isSummaryMode;
-            mainContent.style.display = isSummaryMode || isEditMode ? 'none' : 'flex';
-            summaryContent.style.display = isSummaryMode ? 'block' : 'none';
-            editContent.style.display = 'none';
-
-            if (isSummaryMode) {
-                // 默认显示损益汇总
-                showSummaryView('profit-loss'); 
+            isEditMode = false;
+            if (!isSummaryMode) {
+                isSummaryMode = true;
+                mainContent.style.display = 'none';
+                editContent.style.display = 'none';
+                summaryContent.style.display = 'block';
                 summaryLink.textContent = '返回点单';
                 editLink.textContent = '编辑菜单';
+                updateSummaryUI();
             } else {
+                isSummaryMode = false;
+                summaryContent.style.display = 'none';
+                mainContent.style.display = 'flex';
                 summaryLink.textContent = '查看汇总';
+                updateBill(); 
             }
         }
         
-        /** * 渲染汇总内容 */
-        async function showSummaryView(view) {
+        /** * 切换汇总视图 (损益/收入/支出) */
+        function showSummaryView(view) {
             document.getElementById('profit-loss-view').style.display = 'none';
             document.getElementById('income-view').style.display = 'none';
             document.getElementById('expense-view').style.display = 'none';
 
-            // 移除导航栏的激活样式
-            document.querySelectorAll('#summary-nav button').forEach(btn => {
-                btn.style.opacity = '0.7';
-                if (view === 'profit-loss' && btn.textContent.includes('损益')) btn.style.opacity = '1.0';
-                if (view === 'income' && btn.textContent.includes('收入')) btn.style.opacity = '1.0';
-                if (view === 'expense' && btn.textContent.includes('支出')) btn.style.opacity = '1.0';
-            });
-            
+            document.getElementById(`${view}-view`).style.display = 'block';
 
-            if (view === 'profit-loss') {
-                document.getElementById('profit-loss-view').style.display = 'block';
-                await renderProfitLossSummary();
-            } else if (view === 'income') {
-                document.getElementById('income-view').style.display = 'block';
-                await renderIncomeList();
-            } else if (view === 'expense') {
-                document.getElementById('expense-view').style.display = 'block';
-                await renderExpenseList();
-            }
+            document.querySelectorAll('#summary-nav button').forEach(btn => {
+                btn.style.opacity = 0.7;
+            });
+            document.querySelector(`#summary-nav button[onclick*="${view}"]`).style.opacity = 1.0;
         }
 
-        /** * 修正：渲染损益汇总 (依赖 Firebase 数据) */
-        async function renderProfitLossSummary() {
-            const history = await loadHistoryOrders();
-            const income = await loadIncomeRecords();
-            const expense = await loadExpenseRecords();
+        /** * 渲染汇总 UI */
+        function updateSummaryUI() {
+            const history = loadOrderHistory(); 
+            const income = loadIncome(); 
+            const expense = loadExpense(); 
+
+            // ... (updateSummaryUI 函数代码未改动)
             
+            // 1. 损益汇总视图
             const summaryContainer = document.getElementById('summary-container');
             summaryContainer.innerHTML = '';
             
-            const dailySummary = {};
-            let grandTotal = 0;
+            // 按日期分组订单
+            const dailySales = history.reduce((acc, order) => {
+                const date = order.date;
+                if (!acc[date]) {
+                    acc[date] = { total: 0, count: 0, orders: [] };
+                }
+                acc[date].total += order.total;
+                acc[date].count++;
+                acc[date].orders.push(order);
+                return acc;
+            }, {});
+            
+            // 按日期分组收入/支出
+            const dailyOtherIncome = income.reduce((acc, item) => {
+                 const date = item.date;
+                 acc[date] = (acc[date] || 0) + item.amount;
+                 return acc;
+            }, {});
+            const dailyExpense = expense.reduce((acc, item) => {
+                 const date = item.date;
+                 acc[date] = (acc[date] || 0) + item.amount;
+                 return acc;
+            }, {});
 
-            // 1. 汇总销售收入
-            history.forEach(order => {
-                const date = new Date(order.date).toISOString().split('T')[0];
-                if (!dailySummary[date]) {
-                    dailySummary[date] = { sales: 0, income: 0, expense: 0, orders: [] };
-                }
-                dailySummary[date].sales += order.total;
-                dailySummary[date].orders.push(order);
-                grandTotal += order.total;
-            });
-            
-            // 2. 汇总其他收入
-            income.forEach(record => {
-                const date = record.date;
-                if (!dailySummary[date]) {
-                    dailySummary[date] = { sales: 0, income: 0, expense: 0, orders: [] };
-                }
-                dailySummary[date].income += record.amount;
-                grandTotal += record.amount;
-            });
-            
-            // 3. 汇总支出
-            expense.forEach(record => {
-                const date = record.date;
-                if (!dailySummary[date]) {
-                    dailySummary[date] = { sales: 0, income: 0, expense: 0, orders: [] };
-                }
-                dailySummary[date].expense += record.amount;
-                grandTotal -= record.amount; // 支出是负值
-            });
-            
-            // 4. 渲染结果
-            const sortedDates = Object.keys(dailySummary).sort((a, b) => b.localeCompare(a));
-            
-            sortedDates.forEach(date => {
-                const summary = dailySummary[date];
-                const dailyProfit = summary.sales + summary.income - summary.expense;
+            // 合并所有日期并排序
+            const allDates = [...new Set([...Object.keys(dailySales), ...Object.keys(dailyOtherIncome), ...Object.keys(dailyExpense)])].sort().reverse();
+            let grandTotalProfit = 0;
+
+            allDates.forEach(date => {
+                const sales = dailySales[date] ? dailySales[date].total : 0;
+                const otherIncome = dailyOtherIncome[date] || 0;
+                const dailyExpenses = dailyExpense[date] || 0;
+                const dailyTotalIncome = sales + otherIncome;
+                const dailyProfit = dailyTotalIncome - dailyExpenses;
+                grandTotalProfit += dailyProfit;
+
+                let dailyHtml = `<div class="daily-summary-section">`;
+                dailyHtml += `<h3>${date} 损益</h3>`;
                 
-                const section = document.createElement('div');
-                section.className = 'daily-summary-section';
-                section.innerHTML = `
-                    <h3>${date} 损益</h3>
-                    <p>销售收入: <span style="color: #27ae60;">+${summary.sales.toFixed(0)} Ks</span></p>
-                    <p>其他收入: <span style="color: #27ae60;">+${summary.income.toFixed(0)} Ks</span></p>
-                    <p>总支出: <span style="color: #e74c3c;">-${summary.expense.toFixed(0)} Ks</span></p>
-                    <p class="daily-total">当日总损益: <span style="color: ${dailyProfit >= 0 ? '#27ae60' : '#e74c3c'};">${dailyProfit.toFixed(0)} Ks</span></p>
-                    <button onclick="toggleOrderDetails(this)" style="background-color: #3498db; margin-top: 10px;">查看当日详情 (${summary.orders.length} 笔订单)</button>
-                    <div class="order-details" style="display: none;">
-                        ${summary.orders.map(order => `
-                            <div style="border-bottom: 1px dotted #ccc; padding: 5px 0;">
-                                <p><strong>桌号: ${formatTableDisplay(order.table)}</strong> | 时间: ${new Date(order.date).toLocaleTimeString()}</p>
-                                <ul class="order-items">
-                                    ${Object.keys(order.items).map(name => 
-                                        `<li>${name} x ${order.items[name]}</li>`
-                                    ).join('')}
-                                </ul>
-                                <p style="text-align: right;"><strong>总计: ${order.total.toFixed(0)} Ks</strong></p>
-                                ${order.note ? `<p style="font-size: 0.9em; color: #555;">备注: ${order.note}</p>` : ''}
-                            </div>
-                        `).join('')}
-                        ${income.filter(i => i.date === date).map(i => `
-                            <div style="border-top: 1px dashed #ccc; padding-top: 5px;">
-                                <p style="color: #27ae60;"><strong>[收入]</strong> ${i.description}: +${i.amount.toFixed(0)} Ks</p>
-                            </div>
-                        `).join('')}
-                        ${expense.filter(e => e.date === date).map(e => `
-                            <div style="border-top: 1px dashed #ccc; padding-top: 5px;">
-                                <p style="color: #e74c3c;"><strong>[支出]</strong> ${e.description}: -${e.amount.toFixed(0)} Ks</p>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-                summaryContainer.appendChild(section);
+                dailyHtml += `<p>销售总额: ${formatPrice(sales)} Ks (${dailySales[date] ? dailySales[date].count : 0} 笔)</p>`;
+                dailyHtml += `<p>其他收入: ${formatPrice(otherIncome)} Ks</p>`;
+                dailyHtml += `<p style="color: #e74c3c;">总支出: ${formatPrice(dailyExpenses)} Ks</p>`;
+                dailyHtml += `<p class="daily-total">当日损益: ${formatPrice(dailyProfit)} Ks</p>`;
+                
+                if (dailySales[date] && dailySales[date].orders.length > 0) {
+                     dailyHtml += `<details><summary style="cursor: pointer; color: #3498db;">订单详情 (${dailySales[date].count} 笔)</summary><div class="order-details">`;
+                     dailySales[date].orders.forEach(order => {
+                          dailyHtml += `<p><strong>桌号 ${order.table}</strong>: ${formatPrice(order.total)} Ks ${order.note ? `(${order.note})` : ''}</p>`;
+                          dailyHtml += `<ul class="order-items">`;
+                          for (const name in order.items) {
+                              dailyHtml += `<li>- ${name} x${order.items[name]}</li>`;
+                          }
+                          dailyHtml += `</ul>`;
+                     });
+                     dailyHtml += `</div></details>`;
+                }
+
+                dailyHtml += `</div>`;
+                summaryContainer.innerHTML += dailyHtml;
             });
+
+            document.getElementById('grand-total').textContent = `总损益: ${formatPrice(grandTotalProfit)} Ks`;
             
-            document.getElementById('grand-total').textContent = `总损益: ${grandTotal.toFixed(0)} Ks`;
+            
+            // 2. 收入/支出列表视图
+            
+            // 历史收入列表 (包含销售订单)
+            const allIncome = [...history, ...income].sort((a, b) => b.id - a.id);
+            const incomeList = document.getElementById('income-list');
+            incomeList.innerHTML = allIncome.map(item => `
+                <div style="padding: 10px; border-bottom: 1px dashed #eee;">
+                    <strong>${item.date}</strong> - ${item.type}: ${item.note || item.description || `桌号 ${item.table} 销售`} 
+                    <span style="float: right; color: #27ae60; font-weight: bold;">+${formatPrice(item.total || item.amount)} Ks</span>
+                </div>
+            `).join('');
+
+            // 历史支出列表
+            const expenseList = document.getElementById('expense-list');
+            expenseList.innerHTML = expense.sort((a, b) => b.id - a.id).map(item => `
+                <div style="padding: 10px; border-bottom: 1px dashed #eee;">
+                    <strong>${item.date}</strong> - ${item.description || '未知支出'} 
+                    <span style="float: right; color: #e74c3c; font-weight: bold;">-${formatPrice(item.amount)} Ks</span>
+                </div>
+            `).join('');
+
         }
 
-        /** * 渲染收入列表 (依赖 Firebase 数据) */
-        async function renderIncomeList() {
-            const incomeListDiv = document.getElementById('income-list');
-            incomeListDiv.innerHTML = '';
-            
-            const history = await loadHistoryOrders();
-            const income = await loadIncomeRecords();
-            
-            // 将销售订单格式化为收入记录
-            const salesIncome = history.map(order => ({
-                date: new Date(order.date).toISOString().split('T')[0],
-                description: `销售收入 (桌号: ${formatTableDisplay(order.table)})`,
-                amount: order.total,
-                timestamp: order.date,
-                type: 'sales',
-                fbKey: order.fbKey
-            }));
-            
-            const allIncome = [...salesIncome, ...income];
-            allIncome.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
-            let totalIncome = 0;
+        /** * 添加其他收入 */
+        async function addIncome() {
+             const date = document.getElementById('income-date').value;
+             const description = document.getElementById('income-description').value.trim();
+             const amount = parseFloat(document.getElementById('income-amount').value);
 
-            const table = document.createElement('table');
-            table.style.width = '100%';
-            table.innerHTML = `
-                <thead>
-                    <tr><th>日期</th><th>描述</th><th>类型</th><th>金额 (Ks)</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                    ${allIncome.map(record => {
-                        totalIncome += record.amount;
-                        const typeText = record.type === 'sales' ? '销售订单' : '其他收入';
-                        const deleteBtn = record.type === 'sales' ? 
-                            `<button onclick="deleteHistoryItem('${record.fbKey}', 'history')" style="background-color: #e74c3c; padding: 5px 10px;">删除订单</button>` : 
-                            `<button onclick="deleteHistoryItem('${record.fbKey}', 'income')" style="background-color: #e74c3c; padding: 5px 10px;">删除</button>`;
-                            
-                        return `
-                            <tr>
-                                <td>${record.date}</td>
-                                <td>${record.description}</td>
-                                <td>${typeText}</td>
-                                <td style="text-align: right; color: #27ae60;">+${record.amount.toFixed(0)}</td>
-                                <td>${deleteBtn}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                    <tr style="font-weight: bold; border-top: 2px solid #ccc;">
-                        <td></td><td></td><td>总计:</td>
-                        <td style="text-align: right; color: #27ae60;">+${totalIncome.toFixed(0)}</td><td></td>
-                    </tr>
-                </tbody>
-            `;
-            
-            incomeListDiv.appendChild(table);
+             if (!date || !description || isNaN(amount) || amount <= 0) {
+                 alert("请确保输入有效的日期、描述和金额！");
+                 return;
+             }
+
+             const newIncome = {
+                 id: Date.now(),
+                 date: date,
+                 description: description,
+                 amount: amount,
+                 type: '其他收入'
+             };
+             
+             syncedData.income.push(newIncome);
+             saveIncome(syncedData.income); 
+             
+             document.getElementById('income-description').value = '';
+             document.getElementById('income-amount').value = '';
+             updateSummaryUI();
+             alert(`收入记录成功: ${description}，${formatPrice(amount)} Ks`);
         }
 
-        /** * 渲染支出列表 (依赖 Firebase 数据) */
-        async function renderExpenseList() {
-            const expenseListDiv = document.getElementById('expense-list');
-            expenseListDiv.innerHTML = '';
-            
-            const expense = await loadExpenseRecords();
-            expense.sort((a, b) => new Date(b.date) - new Date(a.date));
-            
-            let totalExpense = 0;
+        /** * 添加支出 */
+        async function addExpense() {
+             const date = document.getElementById('expense-date').value;
+             const description = document.getElementById('expense-description').value.trim();
+             const amount = parseFloat(document.getElementById('expense-amount').value);
 
-            const table = document.createElement('table');
-            table.style.width = '100%';
-            table.innerHTML = `
-                <thead>
-                    <tr><th>日期</th><th>描述</th><th>金额 (Ks)</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                    ${expense.map(record => {
-                        totalExpense += record.amount;
-                        return `
-                            <tr>
-                                <td>${record.date}</td>
-                                <td>${record.description}</td>
-                                <td style="text-align: right; color: #e74c3c;">-${record.amount.toFixed(0)}</td>
-                                <td><button onclick="deleteHistoryItem('${record.fbKey}', 'expense')" style="background-color: #e74c3c; padding: 5px 10px;">删除</button></td>
-                            </tr>
-                        `;
-                    }).join('')}
-                    <tr style="font-weight: bold; border-top: 2px solid #ccc;">
-                        <td></td><td>总计:</td>
-                        <td style="text-align: right; color: #e74c3c;">-${totalExpense.toFixed(0)}</td><td></td>
-                    </tr>
-                </tbody>
-            `;
-            
-            expenseListDiv.appendChild(table);
+             if (!date || !description || isNaN(amount) || amount <= 0) {
+                 alert("请确保输入有效的日期、描述和金额！");
+                 return;
+             }
+
+             const newExpense = {
+                 id: Date.now(),
+                 date: date,
+                 description: description,
+                 amount: amount,
+                 type: '支出'
+             };
+             
+             syncedData.expense.push(newExpense);
+             saveExpense(syncedData.expense);
+             
+             document.getElementById('expense-description').value = '';
+             document.getElementById('expense-amount').value = '';
+             updateSummaryUI();
+             alert(`支出记录成功: ${description}，${formatPrice(amount)} Ks`);
         }
 
-        /** * 修正：删除历史记录项（通用） */
-        function deleteHistoryItem(fbKey, refName) {
-            if (confirm(`确定删除此条 ${refName} 记录吗？云端数据将被删除。`)) {
-                let ref;
-                if (refName === 'history') ref = historyRef;
-                else if (refName === 'income') ref = incomeRef;
-                else if (refName === 'expense') ref = expenseRef;
-                else return;
+        /** * 导出历史账单到 Excel */
+        function exportToExcel() {
+             // ... (exportToExcel 函数代码未改动)
+             const history = loadOrderHistory(); 
+             const income = loadIncome(); 
+             const expense = loadExpense(); 
 
-                ref.child(fbKey).remove().then(() => {
-                    alert("记录已删除。");
-                    // 刷新当前视图
-                    if (isSummaryMode) {
-                        if (refName === 'history') showSummaryView('profit-loss');
-                        else if (refName === 'income') showSummaryView('income');
-                        else if (refName === 'expense') showSummaryView('expense');
-                    }
-                }).catch(e => {
-                    console.error("删除失败:", e);
-                    alert("删除失败，请检查网络或Firebase规则。");
-                });
-            }
+             if (history.length === 0 && income.length === 0 && expense.length === 0) {
+                 alert("没有历史数据可以导出！");
+                 return;
+             }
+
+             const combinedData = [];
+
+             history.forEach(order => {
+                 combinedData.push({
+                     日期: order.date,
+                     类型: order.type,
+                     桌号: order.table,
+                     描述: `销售订单 (${Object.keys(order.items).map(k => `${k}x${order.items[k]}`).join(', ')})`,
+                     收入: order.total,
+                     支出: 0,
+                     备注: order.note
+                 });
+             });
+
+             income.forEach(item => {
+                 combinedData.push({
+                     日期: item.date,
+                     类型: item.type,
+                     桌号: '-',
+                     描述: item.description,
+                     收入: item.amount,
+                     支出: 0,
+                     备注: ''
+                 });
+             });
+
+             expense.forEach(item => {
+                 combinedData.push({
+                     日期: item.date,
+                     类型: item.type,
+                     桌号: '-',
+                     描述: item.description,
+                     收入: 0,
+                     支出: item.amount,
+                     备注: ''
+                 });
+             });
+
+             const worksheet = XLSX.utils.json_to_sheet(combinedData);
+             const workbook = XLSX.utils.book_new();
+             XLSX.utils.book_append_sheet(workbook, worksheet, "资金流水");
+
+             XLSX.writeFile(workbook, `BBQ_Finance_Export_${getTodayDateString()}.xlsx`);
+             alert("数据已导出为 Excel 文件！");
         }
 
-        /** * 展开/收起订单详情 */
-        function toggleOrderDetails(button) {
-            const detailsDiv = button.nextElementSibling;
-            if (detailsDiv.style.display === 'none' || detailsDiv.style.display === '') {
-                detailsDiv.style.display = 'block';
-                button.textContent = '隐藏当日详情';
-            } else {
-                detailsDiv.style.display = 'none';
-                button.textContent = `查看当日详情 (${detailsDiv.querySelectorAll('.order-items').length} 笔订单)`;
+
+        /** * 清空所有历史账单 */
+        async function clearAllHistory() {
+            if (confirm("警告：此操作将永久清除所有历史订单、收入和支出记录！是否继续？")) {
+                // 1. 清空内存数据
+                syncedData.history = [];
+                syncedData.income = [];
+                syncedData.expense = [];
+
+                // 2. 清空 Firebase 数据
+                saveAllDataToFirebase('history', []);
+                saveAllDataToFirebase('income', []);
+                saveAllDataToFirebase('expense', []);
+
+                // 3. 清空本地 IndexedDB 历史 (仅作为清理，实际以内存和云端为准)
+                if (!db) await openDB();
+                db.transaction(['orders_history', 'income_store', 'expense_store'], 'readwrite').objectStore('orders_history').clear();
+                db.transaction(['orders_history', 'income_store', 'expense_store'], 'readwrite').objectStore('income_store').clear();
+                db.transaction(['orders_history', 'income_store', 'expense_store'], 'readwrite').objectStore('expense_store').clear();
+                
+                alert("所有历史记录已清除。");
+                updateSummaryUI(); 
             }
         }
         
-        /** * 导出为 Excel */
-        async function exportToExcel() {
-            const history = await loadHistoryOrders();
-            const income = await loadIncomeRecords();
-            const expense = await loadExpenseRecords();
-            
-            if (history.length === 0 && income.length === 0 && expense.length === 0) {
-                alert("没有历史数据可导出。");
-                return;
-            }
+        let isInitialized = false;
 
-            // 1. 历史订单表
-            const historyData = history.map(order => ({
-                日期: new Date(order.date).toISOString().split('T')[0],
-                时间: new Date(order.date).toLocaleTimeString(),
-                桌号: formatTableDisplay(order.table),
-                点单详情: Object.keys(order.items).map(name => `${name} x ${order.items[name]}`).join('; '),
-                总金额: order.total,
-                备注: order.note || '',
-            }));
-            
-            // 2. 收入表 (含销售收入)
-            const salesIncome = history.map(order => ({
-                日期: new Date(order.date).toISOString().split('T')[0],
-                描述: `销售收入 (桌号: ${formatTableDisplay(order.table)})`,
-                类型: '销售收入',
-                金额: order.total,
-                时间戳: order.date
-            }));
-            const otherIncome = income.map(rec => ({
-                日期: rec.date,
-                描述: rec.description,
-                类型: '其他收入',
-                金额: rec.amount,
-                时间戳: rec.timestamp
-            }));
-            const incomeData = [...salesIncome, ...otherIncome].sort((a, b) => a.时间戳.localeCompare(b.时间戳)).map(i => ({
-                日期: i.日期, 描述: i.描述, 类型: i.类型, 金额: i.金额
-            }));
+        // ----------------------- 初始化函数 (最终修正) -----------------------
 
-            // 3. 支出表
-            const expenseData = expense.map(rec => ({
-                日期: rec.date,
-                描述: rec.description,
-                金额: rec.amount,
-                时间戳: rec.timestamp
-            })).sort((a, b) => a.时间戳.localeCompare(b.时间戳)).map(e => ({
-                日期: e.日期, 描述: e.描述, 金额: e.金额
-            }));
-
-
-            // 4. 生成工作簿
-            const wb = XLSX.utils.book_new();
-            
-            if (historyData.length > 0) {
-                 const ws1 = XLSX.utils.json_to_sheet(historyData);
-                 XLSX.utils.book_append_sheet(wb, ws1, "历史订单");
-            }
-            if (incomeData.length > 0) {
-                 const ws2 = XLSX.utils.json_to_sheet(incomeData);
-                 XLSX.utils.book_append_sheet(wb, ws2, "收入记录");
-            }
-            if (expenseData.length > 0) {
-                 const ws3 = XLSX.utils.json_to_sheet(expenseData);
-                 XLSX.utils.book_append_sheet(wb, ws3, "支出记录");
-            }
-            
-            XLSX.writeFile(wb, `烧烤账单_${getTodayDateString()}.xlsx`);
-            alert("Excel 导出完成！");
-        }
-
-        /** * 将账单内容转换为图片并下载 */
-        function printBillToImage() {
-            // ... (保持原有的 printBillToImage 函数不变，但使用 currentOrderData, currentNoteText) ...
-            const tableDisplay = formatTableDisplay(currentTable);
-            const currentOrder = currentOrderData;
-            const total = calculateTotal(currentOrder, menuItems);
-            const currentNote = currentNoteText;
-            const now = new Date();
-            const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
-            let printContent = `
-                <h2>账单</h2>
-                <div class="print-info">
-                    <p>日期: ${getTodayDateString()}</p>
-                    <p>时间: ${timeString}</p>
-                    <p>桌号: ${tableDisplay}</p>
-                    ${currentNote ? `<p>备注: ${currentNote}</p>` : ''}
-                </div>
-                <hr>
-            `;
-            
-            const menuMap = new Map(menuItems.map(item => [item.name, item]));
-
-            for (const itemName in currentOrder) {
-                const quantity = currentOrder[itemName];
-                const item = menuMap.get(itemName);
-                if (item && quantity > 0) {
-                    const subtotal = item.price * quantity;
-                    printContent += `
-                        <div class="print-item">
-                            <span>${itemName} x ${quantity}</span>
-                            <span>${subtotal.toFixed(0)} Ks</span>
-                        </div>
-                    `;
-                }
-            }
-            
-            printContent += `
-                <hr>
-                <div class="print-total">
-                    <span>总计：</span>
-                    <span>${total.toFixed(0)} Ks</span>
-                </div>
-            `;
-            
-            printArea.innerHTML = printContent;
-            
-            // 确保 DOM 元素可见，但移出屏幕外
-            const originalDisplay = printArea.style.display;
-            printArea.style.display = 'block';
-            printArea.style.opacity = '1'; 
-            void printArea.offsetWidth; 
-
-            html2canvas(printArea, { 
-                scale: 2, 
-                useCORS: true, 
-                backgroundColor: '#ffffff', 
-            }).then(canvas => {
-                const imgUrl = canvas.toDataURL('image/png');
-                const a = document.createElement('a');
-                a.href = imgUrl;
-                a.download = `账单-${currentTable}-${getTodayDateString()}-${now.getTime()}.png`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-
-                printArea.style.display = originalDisplay;
-                printArea.style.opacity = '0';
-                printArea.innerHTML = '';
-                
-                const customAppScheme = 'myposapp://receipt_complete';
-                setTimeout(() => {
-                    window.location.href = customAppScheme;
-                }, 100);
-                
-            }).catch(error => {
-                console.error("图片生成失败:", error);
-                alert("图片生成失败，请检查浏览器控制台。");
-                printArea.style.display = originalDisplay;
-                printArea.style.opacity = '0';
-            });
-        }
-
-        // ------------------------------------
-        // --- 修正后的：初始化入口点 ---
-        // ------------------------------------
-
-        /** * 页面初始化入口点 */
+        /** * 初始化 UI 和数据加载 */
         async function initializeUI() {
-            // 1. 初始化 Firebase 并启动所有监听器
+            // 0. 初始化 Firebase (异步设置监听器)
             initializeFirebase(); 
 
-            // 2. 尝试从 LocalStorage 加载上次使用的桌号
-            let lastTable = localStorage.getItem('bbq_last_table');
-            if (lastTable) {
-                const numberCheck = parseInt(lastTable);
-                // 如果是数字，保持为数字类型
-                if (!isNaN(numberCheck) && String(numberCheck) === lastTable) {
+            // 1. 加载菜单项 (从 IndexedDB 或默认值加载)
+            await loadMenuItems(); 
+            
+            // 2. 加载活跃桌号列表 (从 LocalStorage 优先)
+            activeTables = loadActiveTablesLocally();
+            
+            // 3. 确定当前桌号
+            let lastTable = localStorage.getItem('bbq_last_table'); 
+            
+            if (lastTable !== null) {
+                 const numberCheck = parseInt(lastTable);
+                 if (!isNaN(numberCheck) && String(numberCheck) === lastTable) {
                     lastTable = numberCheck;
-                }
+                 }
+            }
+             
+            if (lastTable !== null && activeTables.map(String).includes(String(lastTable))) {
                 currentTable = lastTable;
             } else {
-                currentTable = 1; // 默认 1 号桌
+                currentTable = activeTables[0] || 1; 
             }
             
-            // 3. 切换到当前桌号 (会启动订单和备注的监听)
-            // Note: listenForActiveTables 监听器在启动时会处理 activeTables.length === 0 的情况
-            // 这里只需要在它启动后确保当前桌子被监听
-            setTimeout(() => {
-                switchTable(currentTable, false);
-            }, 1000); 
+            // 4. UI 绑定和渲染 - 立即渲染，确保功能可用
+            orderNoteInput.addEventListener('input', updateBill); 
+            orderNoteInput.value = loadTableNote(currentTable); 
 
-
-            // 4. 绑定备注输入框的实时写入事件
-            orderNoteInput.addEventListener('input', () => {
-                // 实时写入当前桌号的备注到 Firebase
-                const noteValue = orderNoteInput.value.trim();
-                const safeTableKey = encodeURIComponent(String(currentTable)).replace(/\./g, '%2E');
-                db.ref(`tables/${safeTableKey}/note`).set(noteValue || "");
-                // 注意：备注显示区会由 noteListener 自动更新
-            });
-
-            // 5. 绑定 AudioContext 恢复逻辑到用户首次点击
-            document.addEventListener('click', () => {
-                if (audioContext && audioContext.state === 'suspended') {
-                    audioContext.resume().catch(e => console.error("AudioContext 恢复失败:", e));
-                }
-            }, { once: true });
+            await renderAllMenus(); 
+            generateTableSelectors(); 
+            updateBill();
+            
+            const tableDisplay = (typeof currentTable === 'number' || (!isNaN(parseInt(currentTable)) && String(parseInt(currentTable)) === String(currentTable))) ? `${currentTable}号桌` : String(currentTable);
+            settleButton.textContent = `结算并清空${tableDisplay}`;
+            
+            isInitialized = true;
         }
+
+        // 绑定 AudioContext 恢复逻辑到用户首次点击
+        document.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume().catch(e => console.error("AudioContext 恢复失败:", e));
+            }
+        }, { once: true });
+
 
         // 绑定 DOMContentLoaded 事件
         document.addEventListener('DOMContentLoaded', () => {

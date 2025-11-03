@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 历史报告 (本地存储)</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); }
+        h2 { color: #a04000; border-bottom: 2px solid #ff9933; padding-bottom: 5px; margin-top: 0; }
+        
+        .header-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        #clear-history-btn { background-color: #d9534f; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        #clear-history-btn:disabled { background-color: #ccc; cursor: not-allowed; }
+        .back-link { font-size: 14px; color: #007bff; text-decoration: none; }
+
+        .report-summary { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9; }
+        .report-summary p { margin: 5px 0; font-size: 16px; }
+        .total-highlight { font-size: 20px; font-weight: bold; color: #a04000; }
+
+        .history-list { list-style: none; padding: 0; }
+        .record-item { background-color: #fff; border: 1px solid #eee; margin-bottom: 15px; padding: 15px; border-radius: 4px; }
+        .record-header { display: flex; justify-content: space-between; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px; margin-bottom: 10px; }
+        .record-details ul { list-style: disc; margin: 5px 0 0 20px; padding: 0; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header-controls">
+            <h2>📊 历史报告 (本地)</h2>
+            <a href="order_system.html" class="back-link">← 返回点单系统</a>
+        </div>
+        
+        <div id="report-summary" class="report-summary">
+            <p>总结: 正在加载...</p>
+        </div>
+
+        <div class="header-controls" style="margin-top: 0;">
+            <h3>所有已结账记录</h3>
+            <button id="clear-history-btn" disabled>清空历史记录</button>
+        </div>
+
+        <ul id="history-list" class="history-list">
+            <p style="text-align: center; color: #888;">暂无历史记录。</p>
+        </ul>
+    </div>
+
+    <script>
+        const HISTORY_KEY = 'bbq_history_records';
+        const historyList = document.getElementById('history-list');
+        const reportSummary = document.getElementById('report-summary');
+        const clearHistoryBtn = document.getElementById('clear-history-btn');
+        let historyRecords = [];
+
+        function loadHistory() {
+            try {
+                const data = localStorage.getItem(HISTORY_KEY);
+                historyRecords = data ? JSON.parse(data) : [];
+                renderReport();
+            } catch (e) {
+                console.error("加载历史记录失败:", e);
+                historyList.innerHTML = `<p style="color: red; text-align: center;">加载记录失败。</p>`;
+            }
+        }
+
+        function saveHistory() {
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(historyRecords));
+        }
+
+        function calculateSummary() {
+            const totalRecords = historyRecords.length;
+            const totalAmount = historyRecords.reduce((sum, record) => sum + record.total_amount, 0);
+
+            reportSummary.innerHTML = `
+                <p>已完成总订单数: <span class="total-highlight">${totalRecords}</span> 笔</p>
+                <p>总销售额: <span class="total-highlight">${totalAmount.toFixed(0)}</span> Ks</p>
+            `;
+            clearHistoryBtn.disabled = totalRecords === 0;
+        }
+
+        function renderReport() {
+            historyList.innerHTML = '';
+            calculateSummary();
+
+            if (historyRecords.length === 0) {
+                historyList.innerHTML = `<p style="text-align: center; color: #888;">暂无历史记录。</p>`;
+                return;
+            }
+
+            historyRecords.forEach(record => {
+                const li = document.createElement('li');
+                li.className = 'record-item';
+
+                // 订单头
+                const header = document.createElement('div');
+                header.className = 'record-header';
+                header.innerHTML = `
+                    <span>${record.customer} (结账时间: ${record.timestamp})</span>
+                    <span>总计: <span style="color:#d9534f;">${record.total_amount.toFixed(0)} Ks</span></span>
+                `;
+                li.appendChild(header);
+
+                // 订单详情
+                const details = document.createElement('div');
+                details.className = 'record-details';
+                details.innerHTML = '<h4>订单详情:</h4>';
+                
+                const ul = document.createElement('ul');
+                const itemKeys = Object.keys(record.items);
+                
+                itemKeys.forEach(itemId => {
+                    const item = record.items[itemId];
+                    const itemTotal = item.itemData.price * item.quantity;
+                    const itemLi = document.createElement('li');
+                    itemLi.textContent = `${item.itemData.name} x ${item.quantity} 份 (${item.itemData.price.toFixed(0)} Ks/份) = ${itemTotal.toFixed(0)} Ks`;
+                    ul.appendChild(itemLi);
+                });
+
+                details.appendChild(ul);
+                li.appendChild(details);
+                historyList.appendChild(li);
+            });
+        }
+        
+        function clearHistory() {
+            if (confirm("警告！清空历史记录后将无法恢复。您确定要清空所有已结账记录吗？")) {
+                historyRecords = [];
+                saveHistory();
+                renderReport();
+                alert("历史记录已清空。");
+            }
+        }
+
+        // --- 初始化 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadHistory();
+            clearHistoryBtn.addEventListener('click', clearHistory);
+        });
+    </script>
+</body>
+</html>

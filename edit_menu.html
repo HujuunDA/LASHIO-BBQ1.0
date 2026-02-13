@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Edit Menu</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; margin: 0; padding-top: 60px; background-color: #f4f4f4; }
+        .header-bar { background-color: #FF8C00; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; position: fixed; top: 0; width: 100%; box-sizing: border-box; z-index: 100; }
+        .menu-list { padding: 15px; padding-bottom: 80px; }
+        .category-block { margin-bottom: 20px; }
+        .category-title { font-size: 16px; color: #FF8C00; font-weight: 800; border-left: 4px solid #FF8C00; padding-left: 8px; margin-bottom: 10px; }
+        .menu-item-card { background: white; border-radius: 12px; padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .actions button { margin-left: 8px; padding: 8px 12px; border: none; border-radius: 8px; font-weight: bold; }
+        .edit-btn { background: #fff3e0; color: #FF8C00; }
+        .delete-btn { background: #ffebee; color: #d32f2f; }
+        .fab-add { position: fixed; bottom: 30px; right: 20px; background: #FF4500; color: white; width: 60px; height: 60px; border-radius: 50%; border: none; font-size: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 99; }
+        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 320px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-size: 16px; }
+        .save-btn { background: #FF8C00; color: white; width: 100%; padding: 14px; border: none; border-radius: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <header class="header-bar">
+        <h2 style="margin:0; font-size:18px;">ဟင်းစာရင်းပြင်ရန်</h2>
+        <button onclick="location.href='index.html'" style="background:none; border:1px solid white; color:white; padding:6px 12px; border-radius:8px;">ရှေ့သို့</button>
+    </header>
+
+    <div class="menu-list" id="menuList"></div>
+    <button class="fab-add" onclick="showModal()">＋</button>
+
+    <div id="itemModal" class="modal">
+        <div class="modal-content">
+            <h3 id="modalTitle" style="margin-top:0;">အသစ်ထည့်ရန်</h3>
+            <input type="hidden" id="itemId">
+            <input type="text" id="itemName" placeholder="ဟင်းအမည်">
+            <input type="number" id="itemPrice" placeholder="ဈေးနှုန်း (Ks)">
+            <input type="text" id="itemCategory" placeholder="အမျိုးအစား (ဥပမာ-အကင်)">
+            <button class="save-btn" onclick="saveItem()">သိမ်းမည်</button>
+            <button onclick="hideModal()" style="width:100%; margin-top:15px; background:none; border:none; color:#999;">မသိမ်းပါ</button>
+        </div>
+    </div>
+
+    <script>
+        const CACHE_KEY = 'bbq_app_local_cache';
+        let globalData = { menu_data: [] };
+
+        function init() {
+            const local = localStorage.getItem(CACHE_KEY);
+            if (local) globalData = JSON.parse(local);
+            renderList();
+        }
+
+        function renderList() {
+            const list = document.getElementById('menuList');
+            list.innerHTML = '';
+            const groups = globalData.menu_data.reduce((acc, item) => {
+                (acc[item.category] = acc[item.category] || []).push(item);
+                return acc;
+            }, {});
+
+            for (const [cat, items] of Object.entries(groups)) {
+                let html = `<div class="category-block"><div class="category-title">${cat}</div>`;
+                items.forEach(item => {
+                    html += `
+                        <div class="menu-item-card">
+                            <div><b>${item.name}</b><br><small style="color:#888">${item.price} Ks</small></div>
+                            <div class="actions">
+                                <button class="edit-btn" onclick="editItem('${item.id}')">ပြင်</button>
+                                <button class="delete-btn" onclick="deleteItem('${item.id}')">ဖျက်</button>
+                            </div>
+                        </div>`;
+                });
+                list.innerHTML += html + '</div>';
+            }
+        }
+
+        function showModal(id = null) {
+            if(id) {
+                const item = globalData.menu_data.find(i => i.id === id);
+                document.getElementById('itemId').value = item.id;
+                document.getElementById('itemName').value = item.name;
+                document.getElementById('itemPrice').value = item.price;
+                document.getElementById('itemCategory').value = item.category;
+            } else {
+                document.getElementById('itemId').value = '';
+                document.getElementById('itemName').value = '';
+                document.getElementById('itemPrice').value = '';
+                document.getElementById('itemCategory').value = '';
+            }
+            document.getElementById('itemModal').style.display = 'flex';
+        }
+
+        function saveItem() {
+            const id = document.getElementById('itemId').value;
+            const name = document.getElementById('itemName').value;
+            const price = document.getElementById('itemPrice').value;
+            const category = document.getElementById('itemCategory').value;
+            if(!name || !price || !category) return;
+            if(id) {
+                const idx = globalData.menu_data.findIndex(i => i.id === id);
+                globalData.menu_data[idx] = { id, name, price: Number(price), category };
+            } else {
+                globalData.menu_data.push({ id: 'i'+Date.now(), name, price: Number(price), category });
+            }
+            localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
+            hideModal();
+            renderList();
+        }
+
+        function deleteItem(id) { if(confirm("ဖျက်မှာသေချာသလား?")) { globalData.menu_data = globalData.menu_data.filter(i => i.id !== id); localStorage.setItem(CACHE_KEY, JSON.stringify(globalData)); renderList(); } }
+        function editItem(id) { showModal(id); }
+        function hideModal() { document.getElementById('itemModal').style.display = 'none'; }
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Summary</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; }
+        .back-btn { display: inline-block; padding: 10px 20px; background: #FF8C00; color: white; border-radius: 10px; text-decoration: none; font-weight: bold; margin-bottom: 15px; }
+        .card { background: white; padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 15px; }
+        .total-amount { font-size: 32px; font-weight: 900; color: #FF4500; }
+        .order-item { background: white; padding: 15px; border-radius: 12px; margin-bottom: 12px; border-left: 5px solid #FF8C00; }
+        .order-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-btn">← ပြန်ထွက်မည်</a>
+    
+    <div class="card">
+        <div style="color:#888; font-size: 14px;">ယနေ့စုစုပေါင်းရရှိငွေ</div>
+        <div class="total-amount" id="totalMoney">0 <small style="font-size:16px;">Ks</small></div>
+    </div>
+
+    <button onclick="clearHistory()" style="width:100%; padding:12px; border:none; background:#fff; color:#ff3b30; border-radius:10px; font-weight:bold; margin-bottom:20px;">🗑️ အကုန်ဖျက်မည်</button>
+
+    <div id="historyList"></div>
+
+    <script>
+        const HISTORY_KEY = 'REST_V10_HISTORY';
+        function init() {
+            const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]").reverse();
+            const list = document.getElementById('historyList');
+            let total = 0;
+            history.forEach(o => {
+                total += o.total;
+                const timeStr = new Date(o.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                list.innerHTML += `
+                <div class="order-item">
+                    <div class="order-header">
+                        <span>ဝိုင်း ${o.table}</span>
+                        <span style="color:#FF4500;">${o.total.toLocaleString()} Ks</span>
+                    </div>
+                    <div style="font-size:11px; color:#999;">အချိန်: ${timeStr}</div>
+                </div>`;
+            });
+            document.getElementById('totalMoney').innerHTML = total.toLocaleString() + " <small>Ks</small>";
+        }
+        function clearHistory() { if(confirm("သေချာသလား?")) { localStorage.setItem(HISTORY_KEY, "[]"); location.reload(); } }
+        init();
+    </script>
+</body>
+</html>
